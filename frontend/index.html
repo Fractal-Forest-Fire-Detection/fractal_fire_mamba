@@ -141,6 +141,13 @@
         <div id="meshRelayLog" class="mesh-relay-log">
           <p style="color:#999; font-size:0.8rem;">Waiting for relay events…</p>
         </div>
+        <!-- LoRa Link Quality Panel -->
+        <div style="margin-top: 8px; font-size: 0.75rem; color: #666; padding-left: 2px;">
+          LoRa Link Quality (SX1262):
+        </div>
+        <div id="loraLinkList" style="max-height: 110px; overflow-y: auto; font-size: 0.75rem; margin-top: 2px;">
+          <p style="color:#999; font-size:0.75rem;">Scanning links…</p>
+        </div>
       </div>
 
       <div class="card queen-health-card">
@@ -163,6 +170,16 @@
             <div>Pass Interval: <strong>~10 min</strong> · Visibility: <strong>~7 min/pass</strong></div>
             <div>Next Pass: <strong id="nextSatPass">—</strong></div>
             <div>Uplink Latency: <strong id="satLatency">—</strong></div>
+          </div>
+        </div>
+        <!-- SBD Outbound Queue -->
+        <div
+          style="margin-top: 10px; padding: 8px; background: #f9fafb; border-radius: 4px; border: 1px solid #e2e8f0;">
+          <div style="font-size: 0.75rem; color: var(--navy); font-weight: 600; margin-bottom: 4px;">
+            📨 SBD Outbound Queue
+          </div>
+          <div id="sbdQueue" style="font-size: 0.72rem; max-height: 90px; overflow-y: auto;">
+            <p style="color:#999;">No messages queued</p>
           </div>
         </div>
       </div>

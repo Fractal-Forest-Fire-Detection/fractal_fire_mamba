@@ -23,6 +23,7 @@ Key Features:
 NO SIMULATED DATA - Real hardware integration points
 """
 
+import random
 import numpy as np
 from typing import Dict, List, Tuple, Optional, Set
 from dataclasses import dataclass, field
@@ -1234,7 +1235,15 @@ class MeshNetwork:
             'last_heartbeat': datetime.now(),
             'alerts_sent': 0,
             'battery_level': 100.0,
-            'risk_score': 0.0
+            'risk_score': 0.0,
+            # Persistent simulated values (stabilized)
+            'simulated_sensors': {
+                'humidity': round(random.uniform(30, 60), 1),
+                'soil_moisture': round(random.uniform(10, 80), 1),
+                'temp_base': round(random.uniform(20, 30), 1),
+                'battery_voltage': round(3.2 + random.uniform(-0.05, 0.1), 2),
+                'battery_esr': round(28 + random.uniform(-2, 4), 1)
+            }
         }
         
         if role == 'QUEEN':
@@ -1445,19 +1454,64 @@ class MeshNetwork:
                     if node['last_heartbeat'] else None,
                 'is_queen': node['role'] == 'QUEEN',
                 'label': node.get('label', nid),
-                'queen_id': node.get('queen_id', None)
+                'queen_id': node.get('queen_id', None),
+                # Component Breakdown Scores (Derived from risk for simulation)
+                'chem_score': min(1.0, node['risk_score'] * random.uniform(0.7, 1.1)),
+                'vis_score': min(1.0, node['risk_score'] * random.uniform(0.5, 0.9)),
+                'env_score': min(1.0, node['risk_score'] * random.uniform(0.8, 1.0)), 
+                
+                # Per-node Power Subsystem
+                'power': {
+                    'battery': {
+                        'chemistry': 'LiFePO4',
+                        'voltage_v': node['simulated_sensors']['battery_voltage'],
+                        'soc_pct': node['battery_level'],
+                        'cycles': 120, # Static for demo
+                        'esr_mohm': node['simulated_sensors']['battery_esr'],
+                        'temp_c': node['simulated_sensors']['temp_base'],
+                        'health': 'GOOD' if node['battery_level'] > 40 else 'DEGRADING'
+                    },
+                    'supercap': {
+                        'type': 'EDLC 1F/5.5V',
+                        'voltage_v': 4.85, # Static
+                        'charge_pct': 92.0,
+                        'purpose': 'TX Burst Buffer',
+                        'status': 'READY'
+                    }
+                },
+                # Per-node Sensor Health
+                'sensors': {
+                    'bme688': {
+                        'status': 'OK', 
+                        'gas_res_kohm': 36.5, # Static baseline
+                        'humidity_pct': node['simulated_sensors']['humidity'],
+                        'temp_c': node['simulated_sensors']['temp_base']
+                    },
+                    'capacitive_soil': {
+                        'status': 'OK',
+                        'moisture_pct': node['simulated_sensors']['soil_moisture']
+                    },
+                    'mlx90640': {'status': 'OK', 'pixels_dead': 0},
+                    'camera': {'status': 'SLEEP' if node['role'] == 'DRONE' else 'ACTIVE'},
+                    'lora_modem': {'status': 'TX_READY', 'last_rssi': -40 - random.randint(0, 5)} # Small jitter ok for RSSI
+                }
             })
             
-            # Add LoRa link: Drone → its assigned Queen
+            # Add LoRa link: Drone → its assigned Queen (with radio metrics)
             if node['role'] == 'DRONE':
                 assigned_queen = node.get('queen_id', self.queen_node_id)
                 if assigned_queen and assigned_queen in self.nodes:
                     queen_loc = self.nodes[assigned_queen]['location']
                     distance = node['location'].distance_to(queen_loc)
+                    # Simulate realistic LoRa RSSI/SNR based on distance
+                    rssi = -40 - (distance / 50) + random.uniform(-3, 3)
+                    snr = 12 - (distance / 300) + random.uniform(-1.5, 1.5)
                     links_data.append({
                         'source': nid,
                         'target': assigned_queen,
                         'distance_m': round(distance, 1),
+                        'rssi_dbm': round(max(-120, min(-30, rssi)), 1),
+                        'snr_db': round(max(-5, min(15, snr)), 1),
                         'type': 'lora',
                         'active': node['status'] == 'ONLINE'
                     })
@@ -1480,12 +1534,29 @@ class MeshNetwork:
                 'timestamp': msg.timestamp.isoformat() if msg.timestamp else None
             })
         
+        # Simulated SBD outbound message queue
+        sbd_types = ['ALERT', 'TELEMETRY', 'HEARTBEAT', 'ALERT']
+        sbd_statuses = ['SENT', 'SENT', 'PENDING', 'QUEUED']
+        sbd_queue = []
+        for i, qid in enumerate(self.queen_node_ids):
+            msg_type = sbd_types[i % len(sbd_types)]
+            sbd_queue.append({
+                'id': f'SBD-{self.stats.get("satellite_uplinks", 0) + i:04d}',
+                'queen': qid,
+                'type': msg_type,
+                'priority': 'CRITICAL' if msg_type == 'ALERT' else 'NORMAL',
+                'size_bytes': random.randint(28, 340),
+                'status': sbd_statuses[i % len(sbd_statuses)],
+                'timestamp': (datetime.now() - timedelta(seconds=random.randint(5, 120))).strftime('%H:%M:%S')
+            })
+
         return {
             'nodes': nodes_data,
             'links': links_data,
             'queen_ids': self.queen_node_ids,
             'queen_id': self.queen_node_id,  # backward compat (primary)
             'recent_relays': recent_relays,
+            'sbd_queue': sbd_queue,
             'stats': self.stats
         }
     

@@ -9,6 +9,10 @@ const chartScaleOpts = {
   ticks: { font: { size: 11 } }
 };
 
+// --- Global State ---
+let selectedNodeDetails = null; // Stores currently selected Queen for detail view
+
+
 // Resolve API root intelligently:
 // - If frontend is served from an HTTP origin, use same-origin `/api`.
 // - If opened via file:// or running on a different host, default to localhost:8000 (demo server).
@@ -211,6 +215,100 @@ function updateNodeInfo(data) {
 
   document.getElementById('scoreEnv').textContent = (c.environmental || 0).toFixed(2)
   document.getElementById('barEnv').style.width = ((c.environmental || 0) * 100) + '%'
+
+  // OVERRIDE: If a node is selected, show IT's specific scores instead
+  if (selectedNodeDetails) {
+    const nd = selectedNodeDetails;
+    if (nd.chem_score !== undefined) {
+      document.getElementById('scoreChem').textContent = nd.chem_score.toFixed(2);
+      document.getElementById('barChem').style.width = (nd.chem_score * 100) + '%';
+    }
+    if (nd.vis_score !== undefined) {
+      document.getElementById('scoreVis').textContent = nd.vis_score.toFixed(2);
+      document.getElementById('barVis').style.width = (nd.vis_score * 100) + '%';
+    }
+    if (nd.env_score !== undefined) {
+      document.getElementById('scoreEnv').textContent = nd.env_score.toFixed(2);
+      document.getElementById('barEnv').style.width = (nd.env_score * 100) + '%';
+    }
+  }
+}
+
+// --- Node Selection Logic ---
+window.selectQueen = function (nodeId) {
+  // Find node data from global mesh cache (we need to access it)
+  // Since we don't have global mesh ref easily here relative to loop, 
+  // we'll rely on the fact that click handlers are rebuilt every frame 
+  // with the LATEST data closure if we do it right, OR we store mesh globally.
+  // Better: we store the node object directly in the DOM element OR lookup.
+  // Actually, let's just use the ID and find it in the next render cycle or use a global lookup.
+
+  // For simplicity: toggle selection
+  if (selectedNodeDetails && selectedNodeDetails.id === nodeId) {
+    selectedNodeDetails = null; // Deselect
+    document.getElementById('nodeTelemetryContainer').style.display = 'none';
+  } else {
+    // We need the actual node object. 
+    // We'll trust that the UI render loop will update 'selectedNodeDetails' content 
+    // if we just store the ID, but here we want immediate feedback.
+    // Let's store just the ID for now and let renderQueenHealth update the details object.
+    selectedNodeDetails = { id: nodeId }; // Placeholder until next frame updates it full
+    document.getElementById('nodeTelemetryContainer').style.display = 'block';
+  }
+
+  // Trigger immediate re-render if possible (not needed if 1s loop)
+  // console.log("Selected Node:", nodeId);
+}
+
+function renderNodeTelemetry(node) {
+  const container = document.getElementById('nodeTelemetryContent');
+  const panel = document.getElementById('nodeTelemetryContainer');
+  if (!container || !panel) return;
+
+  if (!node) {
+    panel.style.display = 'none';
+    return;
+  }
+
+  panel.style.display = 'block';
+
+  // Safety check for sensor data
+  const sensors = node.sensors || {};
+  const bme = sensors.bme688 || {};
+  const soil = sensors.capacitive_soil || {};
+  const power = node.power || {};
+  const bat = power.battery || {};
+
+  container.innerHTML = `
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; font-size: 0.75rem;">
+            <!-- Environmental -->
+            <div class="metric-box" style="background:var(--light-bg); padding:6px; border-radius:4px;">
+                <div style="color:#666;">Humidity</div>
+                <div style="font-size:1rem; font-weight:bold; color:var(--deep-blue);">
+                    ${bme.humidity_pct ? bme.humidity_pct.toFixed(1) + '%' : '--'}
+                </div>
+            </div>
+             <div class="metric-box" style="background:var(--light-bg); padding:6px; border-radius:4px;">
+                <div style="color:#666;">Soil Moisture</div>
+                <div style="font-size:1rem; font-weight:bold; color:var(--warning);">
+                    ${soil.moisture_pct ? soil.moisture_pct.toFixed(1) + '%' : '--'}
+                </div>
+            </div>
+            
+            <!-- Power -->
+            <div class="metric-box" style="background:var(--light-bg); padding:6px; border-radius:4px;">
+                <div style="color:#666;">Battery Volts</div>
+                <div>${bat.voltage_v ? bat.voltage_v + 'V' : '--'}</div>
+            </div>
+            <div class="metric-box" style="background:var(--light-bg); padding:6px; border-radius:4px;">
+                <div style="color:#666;">Temp</div>
+                <div>${bme.temp_c ? bme.temp_c + '°C' : '--'}</div>
+            </div>
+        </div>
+        <div style="margin-top:6px; font-size:0.7rem; color:#888;">
+            ID: ${node.id} &bull; ROLE: ${node.role}
+        </div>
+    `;
 }
 
 // Map Logic
@@ -469,6 +567,12 @@ async function loadMesh() {
 
     // Update Queen Health panel
     renderQueenHealth(mesh)
+
+    // Update LoRa Link Quality panel
+    renderLoraLinks(mesh)
+
+    // Update SBD Outbound Queue
+    renderSbdQueue(mesh)
   } catch (e) {
     console.warn("Mesh load failed", e)
   }
@@ -523,6 +627,7 @@ function drawMeshOnMap(mesh) {
       fillOpacity: 0.9,
       weight: 3
     }).addTo(map)
+    marker.on('click', () => selectQueen(q.id))
     marker.bindTooltip(`\u{1F451} ${q.id}<br>${q.label || ''}<br>Alerts: ${q.alerts_sent}`, {
       permanent: false, direction: 'top'
     })
@@ -539,6 +644,9 @@ function drawMeshOnMap(mesh) {
       fillOpacity: 0.8,
       weight: 2
     }).addTo(map)
+    if (d.queen_id) {
+      marker.on('click', () => selectQueen(d.queen_id))
+    }
     marker.bindTooltip(`\u{1F41D} ${d.id}<br>${d.label || ''}<br>Risk: ${(d.risk_score || 0).toFixed(2)}`, {
       permanent: false, direction: 'top'
     })
@@ -557,6 +665,32 @@ function drawMeshOnMap(mesh) {
       dashArray: '5 5'
     }).addTo(map)
     meshLines.push(line)
+  })
+
+  // LoRa Range Circles (5km radius) around each Queen
+  nodes.filter(n => n.is_queen).forEach(q => {
+    const circle = L.circle([q.lat, q.lon], {
+      radius: 5000,  // 5km LoRa range
+      color: '#3b82f6',
+      fillColor: '#3b82f6',
+      fillOpacity: 0.04,
+      weight: 1,
+      dashArray: '6 4',
+      interactive: false
+    }).addTo(map)
+    meshLines.push(circle)
+
+    // Label for range circle
+    const label = L.tooltip({
+      permanent: true,
+      direction: 'bottom',
+      className: 'lora-range-label',
+      offset: [0, 45]
+    })
+      .setContent(`<span style="font-size:9px; color:#3b82f6; background:rgba(255,255,255,0.85); padding:1px 4px; border-radius:2px;">LoRa 5km</span>`)
+      .setLatLng([q.lat, q.lon])
+      .addTo(map)
+    meshLines.push(label)
   })
 }
 
@@ -810,7 +944,8 @@ function renderQueenHealth(mesh) {
     const shortName = (q.label || q.id).split(',')[0].replace('National Park', 'NP')
 
     return `
-      <div style="padding: 8px; margin-bottom: 8px; background: var(--light-bg); border-radius: 4px; border-left: 3px solid ${healthColor};">
+      <div onclick="selectQueen('${q.id}')" 
+           style="cursor: pointer; padding: 8px; margin-bottom: 8px; background: ${q.id === (selectedNodeDetails?.id) ? '#e0f2fe' : 'var(--light-bg)'}; border-radius: 4px; border-left: 3px solid ${healthColor}; border: ${q.id === (selectedNodeDetails?.id) ? '2px solid #3b82f6' : 'none'}; border-left: 3px solid ${healthColor};">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
           <strong style="font-size: 0.8rem; color: var(--navy);">\u{1F451} ${shortName}</strong>
           <span style="font-size: 0.7rem; padding: 1px 6px; border-radius: 3px; background: ${healthColor}; color: white;">${batt.toFixed(0)}%</span>
@@ -823,6 +958,16 @@ function renderQueenHealth(mesh) {
         </div>
       </div>`
   }).join('')
+
+  // Update Telemetry Panel if a node is selected
+  if (selectedNodeDetails && selectedNodeDetails.id) {
+    const target = queens.find(q => q.id === selectedNodeDetails.id);
+    if (target) {
+      selectedNodeDetails = target; // Update with latest data
+      renderNodeTelemetry(target);
+    }
+  }
+
 }
 
 // ==========================================================================
@@ -874,6 +1019,83 @@ function updateSatellitePass() {
     const totalLat = isVisible ? (baseLat + procLat) : NaN
     latencyEl.textContent = isVisible ? `${totalLat.toFixed(0)}ms (LEO)` : 'Waiting for pass…'
   }
+}
+
+// ==========================================================================
+// LORA LINK QUALITY PANEL
+// ==========================================================================
+
+function renderLoraLinks(mesh) {
+  const container = document.getElementById('loraLinkList')
+  if (!container) return;
+
+  const links = (mesh.links || []).filter(l => l.type === 'lora')
+  if (links.length === 0) {
+    container.innerHTML = '<p style="color:#999; font-size:0.72rem;">No LoRa links active</p>'
+    return
+  }
+
+  container.innerHTML = links.map(l => {
+    const rssi = l.rssi_dbm || -80
+    const snr = l.snr_db || 5
+    const dist = l.distance_m || 0
+
+    // Signal strength: green > -70, yellow > -90, red <= -90
+    let sigColor = '#16a34a'
+    let sigLabel = 'STRONG'
+    if (rssi < -90) { sigColor = '#dc2626'; sigLabel = 'WEAK' }
+    else if (rssi < -70) { sigColor = '#f59e0b'; sigLabel = 'FAIR' }
+
+    // Bar width (0-100%) mapped from RSSI range -120 to -30
+    const barPct = Math.max(0, Math.min(100, ((rssi + 120) / 90) * 100))
+
+    const shortSrc = l.source.replace('D_', '').replace('_0', '-')
+    const shortTgt = l.target.replace('QUEEN_', 'Q:')
+
+    return `<div style="display: flex; align-items: center; gap: 4px; padding: 2px 0; border-bottom: 1px solid #f0f0f0;">
+      <span style="width: 60px; font-weight: 500; color: #334155;">${shortSrc}</span>
+      <div style="flex: 1; background: #e2e8f0; border-radius: 2px; height: 6px; position: relative;">
+        <div style="width: ${barPct}%; background: ${sigColor}; height: 100%; border-radius: 2px;"></div>
+      </div>
+      <span style="width: 50px; text-align: right; color: ${sigColor}; font-weight: 600;">${rssi} dBm</span>
+      <span style="width: 38px; text-align: right; color: #64748b;">SNR ${snr}</span>
+    </div>`
+  }).join('')
+}
+
+// ==========================================================================
+// IRIDIUM SBD MESSAGE QUEUE
+// ==========================================================================
+
+function renderSbdQueue(mesh) {
+  const container = document.getElementById('sbdQueue')
+  if (!container) return;
+
+  const queue = mesh.sbd_queue || []
+  if (queue.length === 0) {
+    container.innerHTML = '<p style="color:#999;">No messages queued</p>'
+    return
+  }
+
+  container.innerHTML = queue.map(msg => {
+    // Priority badge
+    const priColor = msg.priority === 'CRITICAL' ? '#dc2626' : '#64748b'
+    const priBg = msg.priority === 'CRITICAL' ? '#fef2f2' : '#f8fafc'
+
+    // Status badge
+    let statusColor = '#16a34a', statusBg = '#f0fdf4'
+    if (msg.status === 'PENDING') { statusColor = '#f59e0b'; statusBg = '#fffbeb' }
+    else if (msg.status === 'QUEUED') { statusColor = '#6366f1'; statusBg = '#eef2ff' }
+
+    const shortQueen = msg.queen.replace('QUEEN_', '')
+
+    return `<div style="display: flex; align-items: center; gap: 4px; padding: 3px 0; border-bottom: 1px solid #f0f0f0;">
+      <span style="font-weight: 600; color: ${priColor}; background: ${priBg}; padding: 0 4px; border-radius: 2px; font-size: 0.65rem;">${msg.type}</span>
+      <span style="color: #475569; flex: 1;">${shortQueen}</span>
+      <span style="color: #94a3b8;">${msg.size_bytes}B</span>
+      <span style="color: ${statusColor}; background: ${statusBg}; padding: 0 4px; border-radius: 2px; font-weight: 600; font-size: 0.65rem;">${msg.status}</span>
+    </div>`
+  }).join('')
 }
 
 // Zoom map to selected node/region
