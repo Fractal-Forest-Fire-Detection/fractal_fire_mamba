@@ -1,38 +1,35 @@
-# Frontend Dashboard
+# Fractal Fire Mamba - Setup Guide
 
-Quick instructions to run the local demo dashboard.
+## 1. Installation
 
-1. Start the demo API (FastAPI + Uvicorn)
+Clone the repository and install dependencies:
 
 ```bash
-cd web
-python3 -m venv venv
-source venv/bin/activate
+git clone https://github.com/Fractal-Forest-Fire-Detection/fractal_fire_mamba.git
+cd fractal_fire_mamba
+# Create virtual environment (optional but recommended)
+python -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
 pip install -r requirements.txt
-# Start on port 8000 (recommended)
-uvicorn web.server:app --host 0.0.0.0 --port 8000 --reload
 ```
 
-2. Serve the frontend files (so fetch() works from browser)
+## 2. Download Mamba Model (Crucial Step!)
+
+The large Mamba model weights (500MB+) are **not included in the git repository** to keep it lightweight. You must download them manually using the included script:
 
 ```bash
-# From project root (serves on port 8080)
-python3 -m http.server 8080 --directory frontend
-# Open http://localhost:8080 in your browser
+python scripts/download_mamba.py
 ```
 
-Notes:
-- The frontend will automatically try to use the same origin `/api` when served via HTTP, and falls back to `http://127.0.0.1:8000/api` when opened via `file://` or when a direct origin is not available. If you run the demo API on a different host/port, set `window.FIRE_MAMBA_API` to your API root before loading `app.js` (advanced).
-- Example: to test against port 8000 (default used in this README) the validator and tests use the env var `API_URL`.
+This will fetch the `state-spaces/mamba-130m-hf` model from Hugging Face and save it to `models/mamba-130m/`.
 
-Examples:
+## 3. Run the Server
+
+Start the backend server:
 
 ```bash
-# Run validator against port 8000
-cd web
-source venv/bin/activate
-API_URL=http://127.0.0.1:8000 python validate_api.py
-
-# Run smoke tests
-API_URL=http://127.0.0.1:8000 python test_api.py
+uvicorn server:app --reload
 ```
+
+The application will automatically detect the downloaded model and print:
+`✅ HF Mamba-130m Active (Neural Adapter Loaded)`
