@@ -1,0 +1,78 @@
+# ====================================================================
+# FRACTAL FIRE MAMBA V2.0 - INDUSTRIAL GRADE
+# Python Dependencies for Complete 6-Phase Fire Detection System
+# ====================================================================
+
+# Core Scientific Computing
+numpy>=1.24.0,<2.0.0
+scipy>=1.10.0
+
+# Computer Vision (Phase-4: Vision Mamba)
+opencv-python>=4.8.0
+
+# Thermal Camera (Phase-4: Night Vision - MLX90640)
+adafruit-circuitpython-mlx90640>=1.2.0
+
+# Hardware Interface Libraries
+# ====================================================================
+
+# Adafruit Sensor Libraries (BME680, DHT22, etc.)
+adafruit-circuitpython-bme680>=3.7.0
+adafruit-circuitpython-dht>=4.0.0
+adafruit-circuitpython-ads1x15>=2.2.0
+
+# GPIO and Hardware Support (Raspberry Pi / Blinka)
+Adafruit-Blinka>=8.20.0
+adafruit-circuitpython-busdevice>=5.2.0
+
+# LoRa Communication (Phase-6)
+adafruit-circuitpython-rfm9x>=2.2.0
+
+# Serial Communication (GPS, Satellite)
+pyserial>=3.5
+
+# GPS Parsing
+pynmea2>=1.19.0
+
+# Data Visualization & Logging (Optional for debugging)
+# ====================================================================
+matplotlib>=3.7.0
+
+# Web Framework (For Dashboard)
+fastapi>=0.100.0
+uvicorn>=0.20.0
+
+# System Utilities
+# ====================================================================
+# Python-dateutil for datetime handling
+python-dateutil>=2.8.2
+
+# ====================================================================
+# NOTES:
+# ====================================================================
+# 1. OpenCV (opencv-python) is used for Phase-4 classical CV smoke detection
+# 2. MLX90640 thermal camera for 24/7 fire detection (night vision capability)
+# 3. NumPy and SciPy are critical for:
+#    - Phase-0: Mamba SSM temporal analysis
+#    - Phase-2: Hurst exponent (R/S analysis)
+#    - Phase-3: Lyapunov exponent (phase space reconstruction)
+# 4. Adafruit libraries are for real hardware sensors (BME680, MQ-2, MLX90640, etc.)
+# 5. RFM9x is for LoRa mesh networking
+# 6. pyserial + pynmea2 for GPS and satellite communication
+#
+# PRODUCTION DEPLOYMENT:
+# - Install on Raspberry Pi 4 or similar ARM device
+# - Python 3.9+ recommended
+# - Virtual environment strongly recommended
+#
+# INSTALLATION:
+#   python3 -m venv venv
+#   source venv/bin/activate  # On Windows: venv\Scripts\activate
+#   pip install -r requirements.txt
+#
+# HARDWARE SUPPORT:
+# - Works on Raspberry Pi (all models with GPIO)
+# - Requires I2C/SPI enabled for sensor communication
+# - Camera interface enabled for ESP32-CAM / Pi Camera
+# - MLX90640 thermal camera for night-time fire detection
+# ====================================================================
