@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Fractal Fire Mamba — Dashboard</title>
+  <link rel="stylesheet" href="styles.css" />
+  <!-- Chart.js CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <!-- Leaflet CDN -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+</head>
+
+<body>
+  <header>
+    <h1>Fractal Fire Mamba — Situational Dashboard</h1>
+    <p class="subtitle">Designed for operational teams & fire departments — clear, explainable indicators</p>
+  </header>
+
+  <main>
+    <section class="row">
+      <div class="card large">
+        <h2>Fused Risk (last 10 minutes)</h2>
+        <canvas id="fusedChart"></canvas>
+      </div>
+
+      <div class="card small">
+        <h2>Current Node</h2>
+        <div id="nodeInfo">
+          <p><strong>ID:</strong> <span id="nodeId">—</span></p>
+          <p><strong>Risk Tier:</strong> <span id="riskTier">—</span></p>
+          <p><strong>Fused Score:</strong> <span id="fusedScore">—</span></p>
+          <p><strong>Temporal Conf:</strong> <span id="temporalConf">—</span></p>
+        </div>
+        <hr />
+        <h3>Vision Health</h3>
+        <p><strong>Mode:</strong> <span id="visionMode">—</span></p>
+        <p><strong>Health:</strong> <span id="cameraHealth">—</span></p>
+        <div id="barGraph"></div>
+      </div>
+
+      <div class="card small">
+        <h2>Alerts & Export</h2>
+        <p style="color:#f7c6a3">Auto-generated explainable alerts based on fused score thresholds</p>
+        <div>
+          <button id="downloadCsv">Download History CSV</button>
+          <button id="focusLatestRed">Focus Latest RED</button>
+          <button id="showSensorGraphs" style="background:#555;margin-left:4px">📈 Sensor Graphs</button>
+        </div>
+        <hr />
+        <div id="alertsList">
+          <p style="color:var(--muted)">No alerts yet</p>
+        </div>
+        <div id="perNodeAlerts">
+          <h4>Per-node Alerts</h4>
+          <div id="nodeAlertsList">
+            <p style="color:var(--muted)">No node alerts</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Hidden Sensor Graphs Section -->
+    <section class="row hidden" id="detailedGraphsRow">
+      <div class="card full-width">
+        <h2>Detailed Sensor Telemetry</h2>
+        <div style="display:grid; grid-template-columns: 1fr 1fr; gap:16px">
+          <div>
+            <h4>Temperature (°C) / Env Risk</h4>
+            <canvas id="tempChart"></canvas>
+          </div>
+          <div>
+            <h4>Chemical (VOC) vs Visual (Smoke)</h4>
+            <canvas id="chemVisChart"></canvas>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="row">
+      <div class="card map">
+        <h2>Map & Death Vectors</h2>
+        <div id="map" style="height: 380px;"></div>
+      </div>
+
+      <div class="card small">
+        <h2>Advanced Analysis</h2>
+
+        <div class="stat-card-row" style="display:flex; justify-content:space-between; margin-bottom:12px">
+          <div class="stat-card">
+            <h3>Mamba Output</h3>
+            <div class="stat-value" id="mambaScoreVal">0.00</div>
+          </div>
+          <div class="stat-card">
+            <h3>YOLOv10 Conf</h3>
+            <div class="stat-value" id="yoloScoreVal" style="color:#ff6b35">0.00</div>
+          </div>
+        </div>
+
+        <!-- Fractal Gate -->
+        <div class="metric-box">
+          <h4>Phase-2: Fractal Gate</h4>
+          <div class="flex-row">
+            <span>Hurst (H):</span>
+            <strong id="hurstVal">—</strong>
+          </div>
+          <div class="progress-bg">
+            <div id="hurstBar" class="progress-fill" style="width:0%"></div>
+          </div>
+          <p class="status-text" id="fractalStatus">WAITING</p>
+        </div>
+
+        <!-- Chaos Kernel -->
+        <div class="metric-box" style="margin-top:12px">
+          <h4>Phase-3: Chaos Kernel</h4>
+          <div class="flex-row">
+            <span>Lyapunov (λ):</span>
+            <strong id="lyapVal">—</strong>
+          </div>
+          <div class="progress-bg">
+            <div id="lyapBar" class="progress-fill" style="width:0%"></div>
+          </div>
+          <p class="status-text" id="chaosStatus">WAITING</p>
+        </div>
+
+        <hr />
+
+        <h3>Score Breakdown</h3>
+        <div class="flex-row small"><span>Chemical</span><span id="scoreChem">—</span></div>
+        <div class="progress-bg small">
+          <div id="barChem" class="progress-fill chem" style="width:0%"></div>
+        </div>
+
+        <div class="flex-row small"><span>Visual</span><span id="scoreVis">—</span></div>
+        <div class="progress-bg small">
+          <div id="barVis" class="progress-fill vis" style="width:0%"></div>
+        </div>
+
+        <div class="flex-row small"><span>Environment</span><span id="scoreEnv">—</span></div>
+        <div class="progress-bg small">
+          <div id="barEnv" class="progress-fill env" style="width:0%"></div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <small>Local demo server: <code>/api/status</code> and <code>/api/history</code></small>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+
+</html>

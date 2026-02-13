@@ -1,0 +1,17 @@
+:root{--bg:#0f1720;--card:#0b1220;--muted:#9aa6b2;--accent:#ff6b35;--glass:rgba(255,255,255,0.03)}
+*{box-sizing:border-box;font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,'Helvetica Neue',Arial}
+body{margin:0;background:linear-gradient(180deg,#071021 0%,#071824 100%);color:#e6eef6}
+header{padding:18px 24px;border-bottom:1px solid rgba(255,255,255,0.04)}
+header h1{margin:0;font-size:18px}
+.subtitle{margin:4px 0 0;color:var(--muted);font-size:13px}
+main{padding:18px;display:flex;flex-direction:column;gap:18px}
+.row{display:flex;gap:18px}
+.card{background:var(--card);padding:14px;border-radius:10px;flex:1;box-shadow:0 6px 18px rgba(2,6,23,0.6)}
+.card.small{flex:0 0 320px}
+.card.large{flex:1}
+.map{flex:1}
+h2{margin:0 0 8px 0;font-size:15px}
+#nodeInfo p{margin:6px 0;color:var(--muted)}
+footer{padding:12px 18px;border-top:1px solid rgba(255,255,255,0.04);color:var(--muted);font-size:13px}
+#featuresList{color:var(--muted);margin:0;padding-left:18px}
+@media(max-width:900px){.row{flex-direction:column}.card.small{flex:auto}}
