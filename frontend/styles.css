@@ -315,60 +315,79 @@ canvas {
 
 /* ===== THE HIVE: Mesh Network Panel ===== */
 .mesh-card {
-    background: #001a2d;
-    color: white;
-    border: 1px solid #004080;
+    background: var(--white);
+    color: var(--text);
+    border: 1px solid var(--border);
 }
+
 .mesh-card .card-title {
-    color: #ffd700;
-    border-bottom-color: #003366;
+    color: var(--navy);
+    border-bottom-color: var(--light-bg);
 }
+
 #meshCanvas {
     width: 100% !important;
     height: 200px !important;
     border-radius: 4px;
     background: #001122;
+    /* Keep canvas dark for contrast with neon semantics */
     display: block;
     margin-bottom: 10px;
 }
+
 .mesh-stats {
     display: grid;
     grid-template-columns: 1fr 1fr 1fr 1fr;
     gap: 6px;
     margin-bottom: 10px;
 }
+
 .mesh-stat {
     text-align: center;
-    background: rgba(0,80,160,0.3);
+    background: var(--light-bg);
     padding: 6px 4px;
     border-radius: 4px;
+    border: 1px solid #e0e0e0;
 }
+
 .mesh-stat-label {
     font-size: 0.7rem;
-    color: #7dafda;
+    color: #666;
     display: block;
 }
+
 .mesh-stat-value {
     font-size: 1.1rem;
     font-weight: bold;
-    color: #00ccff;
+    color: var(--gov-blue);
 }
+
 .mesh-relay-log {
     max-height: 100px;
     overflow-y: auto;
     font-size: 0.75rem;
     font-family: monospace;
-    background: rgba(0,0,0,0.3);
+    background: #f8f9fa;
     padding: 6px;
     border-radius: 4px;
+    border: 1px solid #e0e0e0;
 }
+
 .relay-entry {
-    color: #88ccff;
+    color: #333;
     padding: 2px 0;
-    border-bottom: 1px solid rgba(255,255,255,0.05);
+    border-bottom: 1px solid #eee;
 }
+
 .relay-entry.satellite {
-    color: #ffd700;
+    color: var(--gov-blue);
+    font-weight: bold;
+}
+
+/* Queen Health card: keep compact so Fractal/Chaos stays visible */
+.queen-health-card {
+    max-height: 320px;
+    overflow-y: auto;
 }
 
 /* Responsive */

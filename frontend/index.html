@@ -87,7 +87,7 @@
     <main class="center-panel">
       <div class="card map-card">
         <div class="card-header-overlay">
-          <h2 class="card-title">Tactical Geographic View</h2>
+          <h2 class="card-title">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Tactical Geographic View</h2>
           <button class="gov-btn btn-danger" id="focusLatestRed">Focus Alert</button>
         </div>
         <div id="map"></div>
@@ -114,7 +114,8 @@
       <!-- THE HIVE: Mesh Network Panel -->
       <div class="card mesh-card">
         <h2 class="card-title">🐝 Mesh Network — The Hive</h2>
-        <canvas id="meshCanvas" width="280" height="200"></canvas>
+        <canvas id="meshCanvas" width="280" height="220"
+          style="border: 1px solid #e2e8f0; border-radius: 4px;"></canvas>
         <div class="mesh-stats">
           <div class="mesh-stat">
             <span class="mesh-stat-label">Nodes</span>
@@ -133,21 +134,36 @@
             <span class="mesh-stat-value" id="meshAggCount">0</span>
           </div>
         </div>
+        <div class="mesh-relay-log-header"
+          style="font-size: 0.75rem; color: #666; margin-bottom: 4px; padding-left: 2px;">
+          Live LoRa/Satellite Hops:
+        </div>
         <div id="meshRelayLog" class="mesh-relay-log">
           <p style="color:#999; font-size:0.8rem;">Waiting for relay events…</p>
         </div>
       </div>
 
-      <div class="card camera-card">
-        <h2 class="card-title">Live Camera Feed</h2>
-        <div class="camera-box">
-          <img id="cameraFeed" src="" alt="Waiting for feed..." style="display:none;" />
-          <p id="cameraPlaceholder" style="color:var(--text-secondary); padding:2rem; text-align:center;">[ Signal Lost
-            ]</p>
+      <div class="card queen-health-card">
+        <h2 class="card-title">👑 Queen Health Monitoring</h2>
+        <div id="queenHealthList">
+          <p style="color:#999; font-size:0.8rem;">Loading Queen status…</p>
         </div>
-        <div class="camera-status" style="margin-top:8px; font-size:0.9rem;">
-          <strong>Status:</strong> <span id="camStatus" style="color:var(--gov-green)">ACTIVE</span><br>
-          <strong>Mode:</strong> <span id="visionMode">—</span>
+        <!-- Iridium Satellite Window -->
+        <div class="sat-window"
+          style="margin-top: 12px; padding: 10px; background: var(--light-bg); border-radius: 4px; border: 1px solid #e0e0e0;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+            <strong style="font-size: 0.8rem; color: var(--navy);">🛰️ Iridium LEO Pass Window</strong>
+            <span id="satPassStatus"
+              style="font-size: 0.75rem; padding: 2px 8px; border-radius: 3px; background: var(--success); color: white;">IN
+              VIEW</span>
+          </div>
+          <div style="font-size: 0.75rem; color: #555; line-height: 1.6;">
+            <div>Constellation: <strong>Iridium NEXT (66 LEO)</strong></div>
+            <div>Altitude: <strong>780 km</strong> · Inclination: <strong>86.4°</strong></div>
+            <div>Pass Interval: <strong>~10 min</strong> · Visibility: <strong>~7 min/pass</strong></div>
+            <div>Next Pass: <strong id="nextSatPass">—</strong></div>
+            <div>Uplink Latency: <strong id="satLatency">—</strong></div>
+          </div>
         </div>
       </div>
 

@@ -183,13 +183,14 @@ class SystemState:
         self.mesh_network = MeshNetwork(lora_range_meters=5000.0)
         
         # === 3 QUEEN NODES — Real Australian bushfire regions ===
+        # Coordinates from Black Summer Dataset (NODE-NSW-01: -35.7140, 150.1790)
         queen_configs = [
-            # Deua National Park, NSW (Black Summer epicenter)
-            ("QUEEN_DEUA", -35.7200, 150.1000, "Deua National Park, NSW"),
-            # Blue Mountains, NSW (major fire corridor)
-            ("QUEEN_BLUE", -33.7170, 150.3120, "Blue Mountains, NSW"),
-            # Kangaroo Island, SA (isolated island fires)
-            ("QUEEN_KI",   -35.8000, 137.2150, "Kangaroo Island, SA"),
+            # Deua National Park (Epicenter)
+            ("QUEEN_DEUA", -35.7140, 150.1790, "Deua National Park, NSW"),
+            # Monga National Park (North Neighbor)
+            ("QUEEN_MONGA", -35.6500, 150.1500, "Monga National Park, NSW"),
+            # Budawang National Park (West Neighbor)
+            ("QUEEN_BUDA",  -35.7500, 150.0500, "Budawang National Park, NSW"),
         ]
         
         for queen_id, lat, lon, label in queen_configs:
@@ -209,21 +210,22 @@ class SystemState:
         self.queen_comm = self.queen_comms.get("QUEEN_DEUA")
         
         # === DRONE NODES — 3 per Queen ===
+        # Drones scattered ~1-2km around each Queen
         drone_configs = {
             "QUEEN_DEUA": [
-                ("D_DEUA_01", -35.7180, 150.0970, "Deua NW Sector"),
-                ("D_DEUA_02", -35.7220, 150.1030, "Deua SE Sector"),
-                ("D_DEUA_03", -35.7190, 150.1050, "Deua NE Sector"),
+                ("D_DEUA_01", -35.7120, 150.1770, "Deua Sector N"),
+                ("D_DEUA_02", -35.7160, 150.1810, "Deua Sector S"),
+                ("D_DEUA_03", -35.7145, 150.1750, "Deua Sector W"),
             ],
-            "QUEEN_BLUE": [
-                ("D_BLUE_01", -33.7150, 150.3080, "Blue Mts West"),
-                ("D_BLUE_02", -33.7190, 150.3160, "Blue Mts East"),
-                ("D_BLUE_03", -33.7140, 150.3150, "Blue Mts North"),
+            "QUEEN_MONGA": [
+                ("D_MONGA_01", -35.6480, 150.1480, "Monga Sector N"),
+                ("D_MONGA_02", -35.6520, 150.1520, "Monga Sector S"),
+                ("D_MONGA_03", -35.6500, 150.1450, "Monga Sector W"),
             ],
-            "QUEEN_KI": [
-                ("D_KI_01",   -35.7980, 137.2100, "KI West End"),
-                ("D_KI_02",   -35.8020, 137.2200, "KI Flinders Chase"),
-                ("D_KI_03",   -35.7970, 137.2180, "KI North Coast"),
+            "QUEEN_BUDA": [
+                ("D_BUDA_01", -35.7480, 150.0480, "Buda Sector N"),
+                ("D_BUDA_02", -35.7520, 150.0520, "Buda Sector S"),
+                ("D_BUDA_03", -35.7500, 150.0450, "Buda Sector W"),
             ],
         }
         
@@ -453,12 +455,12 @@ async def get_status():
         
         # Phase-0: Mamba Fusion
         "mamba_ssm": {
-            "fused_score": float(f"{s.fire_risk_score:.2f}"),
-            "temporal_confidence": f"{mamba_meta.get('confidence', s.overall_confidence):.0%}",
-            "cross_modal_lag": float(f"{mamba_meta.get('cross_modal_lag', 0.0):.1f}"),
-            "chemical_trend": float(f"{mamba_meta.get('chemical_trend', 0.0):.2f}"),
-            "visual_trend": float(f"{mamba_meta.get('visual_trend', 0.0):.2f}"),
-            "persistence": f"{mamba_meta.get('persistence', 0.0):.0%}",
+            "fused_score": round(s.fire_risk_score, 4),
+            "temporal_confidence": round(float(mamba_meta.get('confidence', s.overall_confidence) or 0.0), 4),
+            "cross_modal_lag": round(float(mamba_meta.get('cross_modal_lag', 0.0)), 2),
+            "chemical_trend": round(float(mamba_meta.get('chemical_trend', 0.0)), 4),
+            "visual_trend": round(float(mamba_meta.get('visual_trend', 0.0)), 4),
+            "persistence": round(float(mamba_meta.get('persistence', 0.0)), 4),
         },
         
         # Phase-2: Fractal Gate
