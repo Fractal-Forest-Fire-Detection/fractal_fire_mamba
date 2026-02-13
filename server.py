@@ -48,10 +48,20 @@ app.add_middleware(
 # ============================================================================
 import csv
 
+# Helper Class for validation format
+class MockReading:
+    def __init__(self, val, reliability=0.9, extra=None):
+        self.value = float(val)
+        self.is_valid = True
+        self.is_imputed = False
+        self.reliability_score = reliability
+        self.extra_metadata = extra or {}
+
 class RealDataInterface:
     def __init__(self, mission_file="data/real/black_summer_mission.csv"):
         self.data_rows = []
-        self.current_idx = 0
+        # Start closer to the event for demo (skip first ~4 mins of low risk)
+        self.current_idx = 230 
         try:
             with open(mission_file, 'r') as f:
                 reader = csv.DictReader(f)
@@ -64,14 +74,21 @@ class RealDataInterface:
 
         # Fallback if file load failed
         if not self.data_rows:
-            self.fallback = MockSensorInterface()
+            print("⚠️  No data loaded. System will run in IDLE mode.")
+            self.fallback = None
         else:
             self.fallback = None
 
     def read_sensors(self) -> Dict:
         """Stream next row from Real Data CSV"""
-        if self.fallback:
-            return self.fallback.read_sensors()
+        if not self.data_rows:
+            # Safe default if no data
+            return {
+                'VOC': None,
+                'SMOKE': None,
+                'TEMPERATURE': None,
+                'CAMERA_BRIGHTNESS': None
+            }
 
         row = self.data_rows[self.current_idx]
         
@@ -81,15 +98,10 @@ class RealDataInterface:
         # Parse Real Values
         thermal_val = float(row['thermal_score'])
         visual_val = float(row['visual_score'])
+        lat_val = float(row.get('lat', -35.714)) # Default to first row if missing
+        lng_val = float(row.get('lng', 150.179))
         
-        # Helper Class for validation format
-        class MockReading:
-            def __init__(self, val, reliability=0.9, extra=None):
-                self.value = float(val)
-                self.is_valid = True
-                self.is_imputed = False
-                self.reliability_score = reliability
-                self.extra_metadata = extra or {}
+
 
         # Construct image URL if present
         img_url = ""
@@ -98,22 +110,23 @@ class RealDataInterface:
             img_url = f"/api/images/{row['image_filename']}"
 
         return {
-            # Map FLAME thermal intensity to Temperature/VOC proxies
-            'bme680_voc': MockReading(0.1 + (thermal_val * 0.8)), 
-            'ccs811_tvoc': MockReading(0.1 + (thermal_val * 0.8)),
+            # Normalize keys to match Processor expectations
+            'VOC': MockReading(0.1 + (thermal_val * 0.8)), 
+            'TERPENE': MockReading(0.1 + (thermal_val * 0.8)), # Simulating terpenes too
             
             # Smoke presence from Visual Score
-            'camera_smoke': MockReading(visual_val),
+            'SMOKE': MockReading(visual_val),
             
             # Brightness tracks thermal intensity
-            'camera_brightness': MockReading(thermal_val),
+            'CAMERA_BRIGHTNESS': MockReading(thermal_val),
             
-            'soil_moisture': MockReading(0.3 - (thermal_val * 0.2)),
-            'dht_temp': MockReading(0.5 + (thermal_val * 0.5)),
+            'SOIL_MOISTURE': MockReading(0.3 - (thermal_val * 0.2)), # Inverted relationship
+            'TEMPERATURE': MockReading(25.0 + (thermal_val * 50.0)), # Map 0-1 score to 25-75C range
+            'HUMIDITY': MockReading(50.0 - (thermal_val * 40.0)), # Map to 50-10% humidity
             
             # Pass image URL through a hidden channel (state metadata)
-            # We'll attach it to the camera object for extraction later
-            '_image_url': img_url
+            '_image_url': img_url,
+            '_location': {'latitude': lat_val, 'longitude': lng_val}
         }
 
 # Global System State
@@ -128,9 +141,10 @@ class SystemState:
         
         self.history = []
         self.latest_state = None
+        self.latest_location = {"latitude": -35.714, "longitude": 150.179} # Default Australia (Black Summer)
+        self.latest_image = None
         self.latest_fractal = None
         self.latest_chaos = None
-        self.latest_image = None # store image here
         self.running = False
 
 system = SystemState()
@@ -143,6 +157,11 @@ def background_monitor():
             # 1. Read Sensors
             raw_sensors = system.sensor_interface.read_sensors()
             
+            # Skip if no data
+            if not raw_sensors or raw_sensors.get('SMOKE') is None:
+                time.sleep(1.0)
+                continue
+            
             # Extract hidden image URL if present
             if '_image_url' in raw_sensors:
                 img_url = raw_sensors.pop('_image_url')
@@ -150,26 +169,58 @@ def background_monitor():
                     system.latest_image = {
                         "id": int(time.time()),
                         "timestamp": datetime.now().isoformat(),
-                        "confidence": 0.95, # High confidence for real dataset
+                        "confidence": 0.95, 
                         "image_url": img_url,
-                        "location": {"latitude": 35.142, "longitude": -111.65} # Placeholder, improves with real lat/lng
                     }
+            
+            # Extract Location if present
+            if '_location' in raw_sensors:
+                loc = raw_sensors.pop('_location')
+                if loc:
+                     system.latest_location = loc
+                     # Also update image location if just captured
+                     if system.latest_image:
+                         system.latest_image["location"] = loc
 
             # 2. Fuse (Phase-0 with Mamba)
             state = system.fusion_engine.fuse(
                 validated_sensors=raw_sensors,
                 phase1_stats={'trauma_level': 0.0}
             )
+            # Update Global State
+            system.latest_state = state
+
+            # 3. Phase-2: Fractal Gate
+            if system.fractal_gate:
+                fractal_result = system.fractal_gate.update(
+                    risk_score=state.fire_risk_score,
+                    timestamp=state.timestamp,
+                    trauma_level=0.0
+                )
+                system.latest_fractal = fractal_result
+            
+            # 4. Phase-3: Chaos Kernel
+            if system.chaos_kernel:
+                chaos_result = system.chaos_kernel.update(
+                    risk_score=state.fire_risk_score,
+                    temporal_trend=state.temporal_metadata.get('chemical_trend', 0.0), # Use trend from Mamba
+                    timestamp=state.timestamp
+                )
+                system.latest_chaos = chaos_result
+
             # 5. Store History
+            # Extract raw values for CSV (since state might normalized them or omit them)
+            raw_temp = raw_sensors.get('TEMPERATURE', object()).value if 'TEMPERATURE' in raw_sensors else 0.0
+            
             history_point = {
                 'timestamp': state.timestamp.isoformat(),
                 'fused_score': state.fire_risk_score,
                 'chemical': state.chemical_state.get('voc_level', 0),
                 'visual': state.visual_state.get('smoke_presence', 0),
-                'temp': state.environmental_context.get('temperature_c', 0) if state.environmental_context else 0, # Add Temp
-                'env_score': state.environmental_context.get('ignition_susceptibility', 0) if state.environmental_context else 0, # Add Risk Score
-                'hurst': system.latest_fractal.hurst_exponent if system.latest_fractal else 0.5,
-                'lyapunov': system.latest_chaos.lyapunov_exponent if system.latest_chaos else 0.0
+                'temp': raw_temp, 
+                'env_score': state.environmental_context.get('ignition_susceptibility', 0),
+                'hurst': float(system.latest_fractal.hurst_exponent) if system.latest_fractal else 0.5,
+                'lyapunov': float(system.latest_chaos.lyapunov_exponent) if system.latest_chaos else 0.0
             }
             system.history.append(history_point)
             if len(system.history) > 100:
@@ -203,7 +254,21 @@ async def shutdown_event():
 async def get_status():
     """Get current system status enriched with Fractal and Chaos metrics"""
     if not system.latest_state:
-        return {"node_id": "Initializing...", "risk_tier": "WAITING", "mamba_ssm": {}, "fractal": {}, "chaos": {}}
+
+        return {
+            "node_id": "Initializing...", 
+            "risk_tier": "WAITING", 
+            "mamba_ssm": {}, 
+            "fractal": {}, 
+            "chaos": {},
+            "vision": {
+                "visual_score": 0.0,
+                "vision_mode": "—",
+                "camera_health": {"health_score": "—"}
+            },
+            "components": {},
+            "system_status": None
+        }
     
     s = system.latest_state
     mamba_meta = getattr(s, 'temporal_metadata', {})
@@ -214,11 +279,34 @@ async def get_status():
     vis_score = s.visual_state.get('smoke_presence', 0.0)
     env_score = s.environmental_context.get('ignition_susceptibility', 0.0)
     
+    
+    # Determine Active Phase and Weights for Explainability
+    active_phase = "Phase-0: Watchdog"
+    weights = {"visual": 30, "thermal": 30, "chemical": 40} # Default monitoring
+    
+    if s.fire_detected:
+         active_phase = "Phase-6: EVACUATE"
+    elif system.latest_image: # Camera woke up
+         active_phase = "Phase-4: Vision Confirmation"
+         weights = {"visual": 50, "thermal": 30, "chemical": 20} # User requested weights
+    elif system.latest_chaos and system.latest_chaos.is_unstable:
+         active_phase = "Phase-3: Chaos Kernel"
+    elif system.latest_fractal and system.latest_fractal.has_structure:
+         active_phase = "Phase-2: Fractal Gate"
+
     response = {
         "node_id": "NODE-001",
         "timestamp": s.timestamp.isoformat(),
         "risk_tier": s.get_risk_level(),
         "fire_detected": s.fire_detected,
+        "location": system.latest_location,
+        
+        # NEW: System Status for UI
+        "system_status": {
+            "phase": active_phase,
+            "final_risk": float(f"{s.fire_risk_score:.2f}"),
+            "weights": weights
+        },
         
         # Phase-0: Mamba Fusion
         "mamba_ssm": {
@@ -233,7 +321,7 @@ async def get_status():
         # Phase-2: Fractal Gate
         "fractal": {
             "hurst": float(f"{system.latest_fractal.hurst_exponent:.2f}") if system.latest_fractal else 0.5,
-            "has_structure": system.latest_fractal.has_structure if system.latest_fractal else False,
+            "has_structure": bool(system.latest_fractal.has_structure) if system.latest_fractal else False,
             "status": "STRUCTURED" if (system.latest_fractal and system.latest_fractal.has_structure) else "RANDOM",
             "val": float(f"{system.latest_fractal.hurst_exponent:.2f}") if system.latest_fractal else 0.5
         },
@@ -241,7 +329,7 @@ async def get_status():
         # Phase-3: Chaos Kernel
         "chaos": {
             "lyapunov": float(f"{system.latest_chaos.lyapunov_exponent:.2f}") if system.latest_chaos else 0.0,
-            "is_unstable": system.latest_chaos.is_unstable if system.latest_chaos else False,
+            "is_unstable": bool(system.latest_chaos.is_unstable) if system.latest_chaos else False,
             "status": "UNSTABLE" if (system.latest_chaos and system.latest_chaos.is_unstable) else "STABLE",
             "val": float(f"{system.latest_chaos.lyapunov_exponent:.2f}") if system.latest_chaos else 0.0
         },
@@ -256,7 +344,7 @@ async def get_status():
         "vision": {
             "vision_mode": "day",
             "camera_health": {"health_score": "100%"},
-            "visual_score": vis_score
+            "visual_score": float(vis_score)
         },
         "chemical": s.chemical_state,
         "environmental": s.environmental_context,
@@ -270,16 +358,18 @@ async def get_history():
 
 @app.get("/api/alerts")
 async def get_alerts():
+    """Phase-5: Logical Gate (Witness Protocol) & Phase-6: Communication"""
     alerts = []
-    if system.latest_state and system.latest_state.should_alert():
+    # DIAGRAM LOGIC: "Trigger: Risk > 90%"
+    if system.latest_state and system.latest_state.fire_risk_score > 0.8: # Using 0.8 as orange/red threshold
         # Jitter location slightly to simulate different detections or GPS noise
-        lat = 37.7749 + random.uniform(-0.005, 0.005)
-        lng = -122.4194 + random.uniform(-0.005, 0.005)
+        lat = getattr(system, 'current_location', {}).get('latitude', 37.7749) + random.uniform(-0.005, 0.005)
+        lng = getattr(system, 'current_location', {}).get('longitude', -122.4194) + random.uniform(-0.005, 0.005)
         
         alerts.append({
             "id": int(time.time()),
-            "level": "RED" if system.latest_state.fire_risk_score > 0.8 else "ORANGE",
-            "message": "Fire signature detected (Mamba+Fractal confirmed)",
+            "level": "RED" if system.latest_state.fire_risk_score > 0.9 else "ORANGE",
+            "message": "Phase-5 CONFIRMED: Fire signature detected",
             "timestamp": system.latest_state.timestamp.isoformat(),
             "score": f"{system.latest_state.fire_risk_score:.2f}",
             "node_id": "NODE-001",

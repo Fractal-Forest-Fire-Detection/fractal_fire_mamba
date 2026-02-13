@@ -21,6 +21,7 @@ async function fetchJson(path) {
 }
 
 // Initialize chart
+// Initialize chart
 const ctx = document.getElementById('fusedChart').getContext('2d')
 const fusedChart = new Chart(ctx, {
   type: 'line',
@@ -28,17 +29,100 @@ const fusedChart = new Chart(ctx, {
   options: { scales: { y: { min: 0, max: 1 } }, plugins: { legend: { display: false } } }
 })
 
+const ctxTemp = document.getElementById('tempChart').getContext('2d')
+const tempChart = new Chart(ctxTemp, {
+  type: 'line',
+  data: {
+    labels: [],
+    datasets: [
+      { label: 'Temp (°C)', data: [], borderColor: '#ff3535', tension: 0.2, yAxisID: 'y' },
+      { label: 'Env Risk', data: [], borderColor: '#ffa500', tension: 0.2, yAxisID: 'y1' }
+    ]
+  },
+  options: {
+    interaction: { mode: 'index', intersect: false },
+    scales: {
+      y: { type: 'linear', display: true, position: 'left', title: { display: true, text: 'Temp' } },
+      y1: { type: 'linear', display: true, position: 'right', min: 0, max: 1, grid: { drawOnChartArea: false }, title: { display: true, text: 'Risk' } }
+    }
+  }
+})
+
+const ctxChem = document.getElementById('chemVisChart').getContext('2d')
+const chemVisChart = new Chart(ctxChem, {
+  type: 'line',
+  data: {
+    labels: [],
+    datasets: [
+      { label: 'Chemical (VOC)', data: [], borderColor: '#35b8ff', tension: 0.2 },
+      { label: 'Visual (Smoke)', data: [], borderColor: '#9b35ff', tension: 0.2 }
+    ]
+  },
+  options: { scales: { y: { min: 0, max: 1 } } }
+})
+
+const ctxHurst = document.getElementById('hurstChart').getContext('2d')
+const hurstChart = new Chart(ctxHurst, {
+  type: 'line',
+  data: {
+    labels: [],
+    datasets: [{ label: 'Hurst (H)', data: [], borderColor: '#00e0df', backgroundColor: 'rgba(0,224,223,0.1)', tension: 0.1 }]
+  },
+  options: {
+    scales: { y: { min: 0, max: 1 } },
+    plugins: { annotation: { annotations: { line1: { type: 'line', yMin: 0.5, yMax: 0.5, borderColor: '#666', borderWidth: 1, borderDash: [5, 5] } } } }
+  }
+})
+
+const ctxLyap = document.getElementById('lyapunovChart').getContext('2d')
+const lyapunovChart = new Chart(ctxLyap, {
+  type: 'line',
+  data: {
+    labels: [],
+    datasets: [{ label: 'Lyapunov (λ)', data: [], borderColor: '#ff00ff', backgroundColor: 'rgba(255,0,255,0.1)', tension: 0.1 }]
+  },
+  options: { scales: { y: { recommendedMin: -1, recommendedMax: 1 } } }
+})
+
 function updateNodeInfo(data) {
   document.getElementById('nodeId').textContent = data.node_id
   document.getElementById('riskTier').textContent = data.risk_tier
   document.getElementById('fusedScore').textContent = data.mamba_ssm.fused_score
   document.getElementById('mambaScoreVal').textContent = data.mamba_ssm.fused_score
-  // Map 'visual_score' from backend to YOLO confidence display
-  document.getElementById('yoloScoreVal').textContent = (data.vision.visual_score || 0).toFixed(2)
+  // Map 'visual_score' from backend to Visual Confidence display
+  document.getElementById('visualConfVal').textContent = (data.vision.visual_score || 0).toFixed(2)
 
   document.getElementById('temporalConf').textContent = data.mamba_ssm.temporal_confidence
   document.getElementById('visionMode').textContent = data.vision.vision_mode
+  document.getElementById('visionMode').textContent = data.vision.vision_mode
   document.getElementById('cameraHealth').textContent = data.vision.camera_health.health_score
+
+  // NEW: System Status & Weights
+  if (data.system_status) {
+    document.getElementById('activePhase').textContent = data.system_status.phase
+    document.getElementById('finalRiskDisplay').textContent = data.system_status.final_risk.toFixed(2)
+
+    const w = data.system_status.weights
+    document.getElementById('wVisVal').textContent = w.visual + '%'
+    document.getElementById('wVisBar').style.width = w.visual + '%'
+
+    document.getElementById('wThermVal').textContent = w.thermal + '%'
+    document.getElementById('wThermBar').style.width = w.thermal + '%'
+
+    document.getElementById('wChemVal').textContent = w.chemical + '%'
+    document.getElementById('wChemBar').style.width = w.chemical + '%'
+
+    // Color code risk
+    const riskEl = document.getElementById('finalRiskDisplay')
+    if (data.system_status.final_risk > 0.8) riskEl.style.color = '#ff4d4f'
+    else if (data.system_status.final_risk > 0.5) riskEl.style.color = '#ff6b35'
+    else riskEl.style.color = '#fff'
+  }
+
+  // Update map if location is present
+  if (data.location && data.location.latitude) {
+    updateNodeMarker(data.location, data.risk_tier)
+  }
 
   // Fractal Gate (Phase-2)
   const h = data.fractal.hurst || 0.5
@@ -69,13 +153,39 @@ function updateNodeInfo(data) {
   document.getElementById('barEnv').style.width = ((c.environmental || 0) * 100) + '%'
 }
 
+
+
 async function loadHistory() {
   const h = await fetchJson(API_ROOT + '/history')
   const labels = h.series.map(p => new Date(p.timestamp).toLocaleTimeString())
-  const values = h.series.map(p => p.fused_score)
+
+  // Fused Score
   fusedChart.data.labels = labels
-  fusedChart.data.datasets[0].data = values
+  fusedChart.data.datasets[0].data = h.series.map(p => p.fused_score)
   fusedChart.update()
+
+  // Temp & Env
+  tempChart.data.labels = labels
+  tempChart.data.datasets[0].data = h.series.map(p => p.temp || 0)
+  tempChart.data.datasets[1].data = h.series.map(p => p.env_score || 0)
+  tempChart.update()
+
+  // Chem & Visual
+  chemVisChart.data.labels = labels
+  chemVisChart.data.datasets[0].data = h.series.map(p => p.chemical || 0)
+  chemVisChart.data.datasets[1].data = h.series.map(p => p.visual || 0)
+  chemVisChart.update()
+
+  // Fractal (Hurst)
+  hurstChart.data.labels = labels
+  hurstChart.data.datasets[0].data = h.series.map(p => p.hurst || 0.5)
+  hurstChart.update()
+
+  // Chaos (Lyapunov)
+  lyapunovChart.data.labels = labels
+  lyapunovChart.data.datasets[0].data = h.series.map(p => p.lyapunov || 0)
+  lyapunovChart.update()
+
   // update alerts derived from history (local heuristics)
   const localAlerts = findAlertsFromSeries(h.series)
   renderAlerts(localAlerts)
@@ -104,6 +214,63 @@ async function loadStatus() {
   }
 }
 
+// Map Logic
+let map = null;
+let nodeMarker = null;
+let detectionMarkers = {};
+
+function initMap() {
+  // Default to Australia if no location yet
+  map = L.map('map').setView([-35.714, 150.179], 13);
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+    attribution: '&copy; OpenStreetMap &copy; CARTO',
+    subdomains: 'abcd',
+    maxZoom: 19
+  }).addTo(map);
+}
+
+function updateNodeMarker(loc, tier) {
+  if (!map) initMap(); // Lazy init
+
+  const lat = loc.latitude;
+  const lng = loc.longitude;
+  const color = tier === 'CRITICAL' ? '#ff4d4f' : tier === 'ELEVATED' ? '#ff6b35' : '#33b864';
+
+  if (nodeMarker) {
+    nodeMarker.setLatLng([lat, lng]);
+    nodeMarker.setStyle({ color: color, fillColor: color });
+    // Don't auto-center every update to allow user panning, unless it's way off?
+    // map.setView([lat, lng]); 
+  } else {
+    nodeMarker = L.circleMarker([lat, lng], {
+      radius: 8,
+      color: color,
+      fillColor: color,
+      fillOpacity: 1.0
+    }).addTo(map);
+    map.setView([lat, lng], 13);
+  }
+}
+
+function zoomToAlert(alert, opts = { zoom: 16 }) {
+  if (!map) return;
+  // Alerts from backend might not have location, depends on source
+  // But we check before calling
+  // Actually, local alerts array doesn't have location attached easily unless we link it
+  // But 'focusLatestRed' fetches correct alerts with location.
+
+  // If alert object has Lat/Lng (e.g. from backend)
+  if (alert.location) {
+    map.setView([alert.location.latitude, alert.location.longitude], opts.zoom);
+    L.popup()
+      .setLatLng([alert.location.latitude, alert.location.longitude])
+      .setContent(`<strong>${alert.level} ALERT</strong><br>${new Date(alert.timestamp).toLocaleTimeString()}`)
+      .openOn(map);
+  }
+}
+
+
+// Focus the latest global RED alert
 // Focus the latest global RED alert
 async function focusLatestRed() {
   const all = await fetchJson(API_ROOT + '/alerts')
@@ -129,83 +296,45 @@ async function ackAlert(id) {
   }
 }
 
-// Map and death vectors
-let map
-function initMap() {
-  map = L.map('map').setView([37.7749, -122.4194], 13)
-  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '© OpenStreetMap contributors' }).addTo(map)
-}
-
-// Manage alert markers on the map
-const alertMarkers = {}
-
-function clearAlertMarkers() {
-  Object.values(alertMarkers).forEach(obj => {
-    try { if (obj.marker) map.removeLayer(obj.marker) } catch (e) { }
-    try { if (obj.ring) map.removeLayer(obj.ring) } catch (e) { }
-  })
-  for (const k in alertMarkers) delete alertMarkers[k]
-}
-
-function addOrUpdateAlertMarker(alert) {
-  if (!alert || !alert.location) return null
-  const id = alert.id || (`${alert.node_id}_${alert.timestamp}`)
-  const lat = alert.location.latitude
-  const lng = alert.location.longitude
-  const color = alert.level === 'RED' ? '#ff4d4f' : alert.level === 'ORANGE' ? '#ff6b35' : '#f7d154'
-
-  // compute ring radius by severity (meters)
-  const severityRadius = alert.level === 'RED' ? 200 : alert.level === 'ORANGE' ? 120 : 60
-
-  if (alertMarkers[id]) {
-    const obj = alertMarkers[id]
-    if (obj.marker) obj.marker.setLatLng([lat, lng])
-    if (obj.ring) obj.ring.setLatLng([lat, lng])
-    if (obj.marker) obj.marker.setPopupContent(`<strong>${alert.level}</strong> ${alert.message || ''}`)
-    return obj.marker
-  }
-
-  const marker = L.circleMarker([lat, lng], { radius: 8, color: color, fillColor: color, fillOpacity: 0.9 }).addTo(map)
-  marker.bindPopup(`<strong>${alert.level}</strong><br/>${alert.message || ''}<br/>${new Date(alert.timestamp).toLocaleString()}`)
-  const ring = L.circle([lat, lng], { radius: severityRadius, color: color, weight: 2, fill: false, opacity: 0.35 }).addTo(map)
-  alertMarkers[id] = { marker, ring }
-  return marker
-}
-
-function zoomToAlert(alert, opts = { zoom: 15 }) {
-  if (!alert || !alert.location) return
-  const lat = alert.location.latitude
-  const lng = alert.location.longitude
-  map.setView([lat, lng], opts.zoom || 15)
-  const m = addOrUpdateAlertMarker(alert)
-  if (m) m.openPopup()
-}
-
-async function loadDeathVectors() {
-  const v = await fetchJson(API_ROOT + '/death_vectors')
-  v.vectors.forEach(vec => {
-    const from = [vec.from.lat, vec.from.lng]
-    const to = [vec.to.lat, vec.to.lng]
-    L.polyline([from, to], { color: '#ff6b35', weight: 3, opacity: 0.9 }).addTo(map)
-    L.circle(from, { radius: 40, color: '#ff6b35', fill: false }).addTo(map)
-  })
-}
+// Map and death vectors (Restored)
 
 // Detections layer (UAV detections)
-const detectionMarkers = {}
-
-function clearDetectionMarkers() {
-  Object.values(detectionMarkers).forEach(m => {
-    try { map.removeLayer(m) } catch (e) { }
-  })
-  for (const k in detectionMarkers) delete detectionMarkers[k]
-}
-
 async function loadDetections() {
   try {
     const r = await fetchJson(API_ROOT + '/detections')
     const dets = r.detections || []
-    clearDetectionMarkers()
+
+    // Update Camera Feed if detection exists
+    const feedImg = document.getElementById('cameraFeed')
+    const feedPlaceholder = document.getElementById('cameraPlaceholder')
+    const camStatus = document.getElementById('camStatus')
+
+    if (dets.length > 0) {
+      const latest = dets[0] // Assuming latest is first or only
+      let src = ''
+      if (latest.image_url) src = latest.image_url
+      else if (latest.image_b64) src = `data:image/jpeg;base64,${latest.image_b64}`
+
+      if (src) {
+        feedImg.src = src
+        feedImg.style.display = 'block'
+        feedPlaceholder.style.display = 'none'
+        camStatus.textContent = 'DETECTING'
+        camStatus.style.color = '#ff4d4f'
+      }
+    } else {
+      // Keep last image or showing placeholder? 
+      // For now, let's revert to placeholder if no active detection to simulate "live" feed behavior clearing up
+      // Or we could leave it. Let's leave it if it was set, but maybe show "Scanning..."
+      // Actually, let's just keep the last image if available, or reset if we want strict "current state".
+      // Given the demo nature, it might flicker if we reset. Let's only update if we have something.
+      if (feedImg.style.display === 'none') {
+        camStatus.textContent = 'SCANNING'
+        camStatus.style.color = '#33b864'
+      }
+    }
+
+    // Map markers
     dets.forEach(d => {
       if (!d.location) return
       const id = d.id
@@ -213,13 +342,19 @@ async function loadDetections() {
       const lng = d.location.longitude
       const conf = d.confidence || 0
       const color = conf >= 0.8 ? '#ff4d4f' : conf >= 0.6 ? '#ff6b35' : '#f7d154'
-      const icon = L.circleMarker([lat, lng], { radius: 6, color: color, fillColor: color, fillOpacity: 0.9 }).addTo(map)
-      let popupHtml = `<strong>UAV detection</strong><br/>confidence: ${conf.toFixed(2)}<br/>${new Date(d.timestamp).toLocaleString()}`
-      if (d.image_url) { popupHtml += `<br/><img src="${d.image_url}" style="max-width:180px;max-height:120px;display:block;margin-top:6px"/>` }
-      else if (d.image_b64) { popupHtml += `<br/><img src="data:image/jpeg;base64,${d.image_b64}" style="max-width:180px;max-height:120px;display:block;margin-top:6px"/>` }
-      icon.bindPopup(popupHtml)
-      detectionMarkers[id] = icon
+
+      if (!map) initMap();
+
+      if (!detectionMarkers[id]) {
+        const icon = L.circleMarker([lat, lng], { radius: 6, color: color, fillColor: color, fillOpacity: 0.9 }).addTo(map)
+        let popupHtml = `<strong>UAV detection</strong><br/>confidence: ${conf.toFixed(2)}<br/>${new Date(d.timestamp).toLocaleString()}`
+        if (d.image_url) { popupHtml += `<br/><img src="${d.image_url}" style="max-width:180px;max-height:120px;display:block;margin-top:6px"/>` }
+        else if (d.image_b64) { popupHtml += `<br/><img src="data:image/jpeg;base64,${d.image_b64}" style="max-width:180px;max-height:120px;display:block;margin-top:6px"/>` }
+        icon.bindPopup(popupHtml)
+        detectionMarkers[id] = icon
+      }
     })
+
   } catch (e) {
     console.error('failed to load detections', e)
   }
@@ -267,14 +402,28 @@ function renderAlerts(alerts) {
     b.addEventListener('click', ev => {
       const ts = ev.target.dataset.ts
       const a = alerts.find(x => x.timestamp === ts)
-      if (a) zoomToAlert(a, { zoom: 16 })
+      // Local heuristic alerts don't have location attached in 'alerts' array easily
+      // So zoom might fail unless we attach location to them. 
+      // For now, let's just log or ignore if no loc.
+      // Actually, standard alerts comes from backend with loc. 
+      // The local heuristics (loadHistory) don't have loc.
+      if (a && a.location) zoomToAlert(a, { zoom: 16 })
     })
   })
 }
 
 function downloadCSV(series) {
-  const rows = [['timestamp', 'fused_score']]
-  series.forEach(p => rows.push([p.timestamp, p.fused_score]))
+  const rows = [['timestamp', 'fused_score', 'temp', 'env_risk', 'chemical', 'visual', 'fractal_hurst', 'chaos_lyapunov']]
+  series.forEach(p => rows.push([
+    p.timestamp,
+    p.fused_score,
+    p.temp || 0,
+    p.env_score || 0,
+    p.chemical || 0,
+    p.visual || 0,
+    p.hurst || 0.5,
+    p.lyapunov || 0
+  ]))
   const csv = rows.map(r => r.join(',')).join('\n')
   const blob = new Blob([csv], { type: 'text/csv' })
   const url = URL.createObjectURL(blob)
@@ -290,21 +439,16 @@ function downloadCSV(series) {
 async function refreshAll() {
   await loadHistory()
   await loadStatus()
-  await loadDeathVectors()
   await loadDetections()
 }
 
 window.addEventListener('load', () => {
-  initMap()
   refreshAll()
   // Wire CSV download
   document.getElementById('downloadCsv').addEventListener('click', async () => {
     const h = await fetchJson(API_ROOT + '/history')
     downloadCSV(h.series)
   })
-  // Wire focus latest RED button
-  const focusBtn = document.getElementById('focusLatestRed')
-  if (focusBtn) focusBtn.addEventListener('click', focusLatestRed)
   // Refresh every 10s
   setInterval(refreshAll, 10000)
 })
