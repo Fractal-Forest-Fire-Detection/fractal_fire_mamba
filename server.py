@@ -98,8 +98,12 @@ class RealDataInterface:
         # Parse Real Values
         thermal_val = float(row['thermal_score'])
         visual_val = float(row['visual_score'])
-        lat_val = float(row.get('lat', -35.714)) # Default to first row if missing
-        lng_val = float(row.get('lng', 150.179))
+        lat_val = float(row.get('lat', -35.72)) # Deua National Park (Black Summer bushland)
+        lng_val = float(row.get('lng', 150.10))
+        # Offset coordinates ~7km WNW into Deua National Park bushland
+        # (CSV originals are near Batemans Bay township / coastal water)
+        lat_val = lat_val + 0.01   # shift slightly south
+        lng_val = lng_val - 0.08   # shift ~7km west into national park
         
 
 
@@ -141,7 +145,7 @@ class SystemState:
         
         self.history = []
         self.latest_state = None
-        self.latest_location = {"latitude": -35.714, "longitude": 150.179} # Default Australia (Black Summer)
+        self.latest_location = {"latitude": -35.72, "longitude": 150.10} # Deua National Park, NSW (Black Summer)
         self.latest_image = None
         self.latest_fractal = None
         self.latest_chaos = None
@@ -363,8 +367,11 @@ async def get_alerts():
     # DIAGRAM LOGIC: "Trigger: Risk > 90%"
     if system.latest_state and system.latest_state.fire_risk_score > 0.8: # Using 0.8 as orange/red threshold
         # Jitter location slightly to simulate different detections or GPS noise
-        lat = getattr(system, 'current_location', {}).get('latitude', 37.7749) + random.uniform(-0.005, 0.005)
-        lng = getattr(system, 'current_location', {}).get('longitude', -122.4194) + random.uniform(-0.005, 0.005)
+        # Use actual Australian Black Summer coordinates from system.latest_location
+        base_lat = system.latest_location.get('latitude', -35.72) if system.latest_location else -35.72
+        base_lng = system.latest_location.get('longitude', 150.10) if system.latest_location else 150.10
+        lat = base_lat + random.uniform(-0.003, 0.003)
+        lng = base_lng + random.uniform(-0.003, 0.003)
         
         alerts.append({
             "id": int(time.time()),
@@ -391,6 +398,85 @@ async def get_detections():
         # Only show detection if risk is elevated (syncs with fire video)
         dets.append(system.latest_image)
     return {"detections": dets}
+
+@app.get("/api/velocity")
+async def get_velocity():
+    """Compute fire spread velocity from recent location/risk history."""
+    if len(system.history) < 2:
+        return {"velocity_kmh": 0.0, "direction_deg": 0, "direction": "N/A"}
+    
+    # Use change in risk over time as proxy for fire velocity
+    recent = system.history[-5:]
+    risk_delta = abs(recent[-1]['fused_score'] - recent[0]['fused_score'])
+    avg_risk = sum(p['fused_score'] for p in recent) / len(recent)
+    
+    # Simulated velocity based on risk dynamics
+    velocity = risk_delta * 15.0 + avg_risk * 3.0  # km/h
+    
+    return {
+        "velocity_kmh": round(velocity, 2),
+        "direction_deg": 0,
+        "direction": "N/A",
+        "avg_risk": round(avg_risk, 3),
+        "samples": len(recent)
+    }
+
+from pydantic import BaseModel
+
+class CommandRequest(BaseModel):
+    command: str
+
+@app.post("/api/command")
+async def handle_command(req: CommandRequest):
+    """Process operator commands from the Command Terminal."""
+    cmd = req.command.strip().upper()
+    parts = cmd.split()
+    
+    if parts[0] == "DEPLOY" and len(parts) > 1:
+        return {
+            "response": [
+                f"[SYS] DEPLOY command received for {parts[1]}.",
+                f"[SYS] Dispatching UAV to sector {parts[1]}...",
+                "[OK] Deployment order queued."
+            ],
+            "level": "sys"
+        }
+    elif parts[0] == "EVACUATE" and len(parts) > 1:
+        return {
+            "response": [
+                f"[WARN] EVACUATE order issued for {parts[1]}!",
+                "[WARN] Alerting all personnel in zone.",
+                "[SYS] Emergency services notified."
+            ],
+            "level": "warn"
+        }
+    elif parts[0] == "PING":
+        return {
+            "response": [
+                f"[OK] PONG — Server uptime: {int(time.time() - system.history[0].get('_start', time.time()) if system.history else 0)}s",
+                f"[SYS] History buffer: {len(system.history)} samples"
+            ],
+            "level": "ok"
+        }
+    elif parts[0] == "REPORT":
+        if system.latest_state:
+            return {
+                "response": [
+                    "[SYS] === FULL SYSTEM REPORT ===",
+                    f"  Risk Score:  {system.latest_state.fire_risk_score:.4f}",
+                    f"  Fire Detected: {system.latest_state.fire_detected}",
+                    f"  Confidence:  {system.latest_state.overall_confidence:.2%}",
+                    f"  Fractal H:   {system.latest_fractal.hurst_exponent:.4f}" if system.latest_fractal else "  Fractal: N/A",
+                    f"  Lyapunov λ:  {system.latest_chaos.lyapunov_exponent:.4f}" if system.latest_chaos else "  Chaos: N/A",
+                    f"  Location:    {system.latest_location}",
+                    f"  History Pts: {len(system.history)}",
+                    "[SYS] === END REPORT ==="
+                ],
+                "level": "sys"
+            }
+        return {"response": ["[WARN] System not yet initialized."], "level": "warn"}
+    else:
+        return {"response": None}
 
 # Serve Frontend
 app.mount("/frontend", StaticFiles(directory="frontend"), name="frontend")

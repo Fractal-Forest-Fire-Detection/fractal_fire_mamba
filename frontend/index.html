@@ -4,224 +4,180 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Fractal Fire Mamba — Dashboard</title>
+  <title>National Fire Monitoring Service | Fractal Fire Mamba</title>
   <link rel="stylesheet" href="styles.css" />
-  <!-- Chart.js CDN -->
-  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-  <!-- Leaflet Map -->
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
 
 <body>
-  <header>
-    <h1>Fractal Fire Mamba — Situational Dashboard</h1>
-    <p class="subtitle">Designed for operational teams & fire departments — clear, explainable indicators</p>
+  <header class="gov-header">
+    <div class="gov-brand">
+      <span class="gov-logo">Official Service</span>
+      <h1 class="gov-title">National Forest Fire Monitoring Portal</h1>
+    </div>
+    <div id="threatBadge" class="status-indicator status--normal">
+      NORMAL OPERATIONS
+    </div>
   </header>
 
-  <main>
-    <section class="row">
-      <div class="card large">
-        <h2>Fused Risk (last 10 minutes)</h2>
-        <canvas id="fusedChart"></canvas>
-      </div>
+  <div class="main-layout">
+    <!-- LEFT SIDEBAR: Controls & Status -->
+    <aside class="sidebar scroll-panel">
+      <section class="card">
+        <h2 class="card-title">Station Selection</h2>
+        <select id="nodeSelector" class="gov-select">
+          <option value="NODE-001">Deua National Park (Primary)</option>
+          <option value="NODE-002">Monga State Forest (East)</option>
+        </select>
+      </section>
 
-      <div class="card small">
-        <h2>Current Node</h2>
-        <div id="nodeInfo">
-          <p><strong>ID:</strong> <span id="nodeId">—</span></p>
-          <p><strong>Risk Tier:</strong> <span id="riskTier">—</span></p>
-          <p><strong>Fused Score:</strong> <span id="fusedScore">—</span></p>
-          <p><strong>Temporal Conf:</strong> <span id="temporalConf">—</span></p>
+      <section class="card">
+        <h2 class="card-title">Current Risk Assessment</h2>
+        <div class="phase-box">
+          <div class="phase-dot" id="phaseDot"></div>
+          <span id="activePhase">Monitoring</span>
+          <div class="risk-score" id="finalRiskDisplay">0.00</div>
         </div>
-      </div>
-
-      <!-- NEW: System Status & Weights -->
-      <div class="card full-width">
-        <h2>Final Fire Detection Risk</h2>
-        <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:12px;">
-          <div>
-            <h3 id="activePhase" style="color:#ff6b35; margin:0;">Phase-0: Monitoring</h3>
-            <p style="margin:4px 0 0 0; color:var(--muted); font-size:0.9em;">Active Pipeline Stage</p>
-          </div>
-          <div style="text-align:right;">
-            <div id="finalRiskDisplay" style="font-size:2.5em; font-weight:bold; color:#fff;">0.00</div>
-            <small>RISK SCORE</small>
-          </div>
+        <div class="data-row">
+          <span class="label">Risk Tier:</span>
+          <span class="value" id="riskTier">Low</span>
         </div>
+        <div class="data-row">
+          <span class="label">System Confidence:</span>
+          <span class="value" id="temporalConf">98%</span>
+        </div>
+      </section>
 
-        <div style="background:#1a1d21; padding:12px; border-radius:8px;">
-          <p style="margin-bottom:8px; font-size:0.9em;"><strong>Fusion Weights (Explainable AI):</strong></p>
-
-          <div class="flex-row small"><span>Visual Input</span><span id="wVisVal">30%</span></div>
-          <div class="progress-bg small">
-            <div id="wVisBar" class="progress-fill" style="width:30%; background:#9b35ff;"></div>
-          </div>
-
-          <div class="flex-row small"><span>Thermal (Mamba)</span><span id="wThermVal">30%</span></div>
-          <div class="progress-bg small">
-            <div id="wThermBar" class="progress-fill" style="width:30%; background:#ff3535;"></div>
-          </div>
-
-          <div class="flex-row small"><span>Chemical</span><span id="wChemVal">40%</span></div>
-          <div class="progress-bg small">
-            <div id="wChemBar" class="progress-fill" style="width:40%; background:#35b8ff;"></div>
+      <section class="card">
+        <h2 class="card-title">Analysis Weights</h2>
+        <div class="bar-group">
+          <label>Visual Analysis</label>
+          <div class="bar">
+            <div class="fill" id="wVisBar" style="width:33%"></div>
           </div>
         </div>
-      </div>
-
-      <hr />
-      <h3>Vision Health</h3>
-      <p><strong>Mode:</strong> <span id="visionMode">—</span></p>
-      <p><strong>Health:</strong> <span id="cameraHealth">—</span></p>
-      <div id="barGraph"></div>
-      </div>
-
-      <div class="card small">
-        <h2>Alerts & Export</h2>
-        <p style="color:#f7c6a3">Auto-generated explainable alerts based on fused score thresholds</p>
-        <div>
-          <button id="downloadCsv">Download History CSV</button>
-          <button id="focusLatestRed">Focus Latest RED</button>
+        <div class="bar-group">
+          <label>Mamba Thermal SSM</label>
+          <div class="bar">
+            <div class="fill" id="wThermBar" style="width:33%"></div>
+          </div>
         </div>
-        <hr />
+        <div class="bar-group">
+          <label>Chemical Signatures</label>
+          <div class="bar">
+            <div class="fill" id="wChemBar" style="width:33%"></div>
+          </div>
+        </div>
+      </section>
+
+      <div class="card alerts-card">
+        <h2 class="card-title">System Alerts</h2>
+        <div class="alert-controls">
+          <button class="gov-btn doc-btn" id="downloadCsv">CSV</button>
+        </div>
         <div id="alertsList">
-          <p style="color:var(--muted)">No alerts yet</p>
+          <p style="color:var(--text-secondary)">No alerts yet</p>
         </div>
-        <div id="perNodeAlerts">
-          <h4>Per-node Alerts</h4>
-          <div id="nodeAlertsList">
-            <p style="color:var(--muted)">No node alerts</p>
-          </div>
+      </div>
+    </aside>
+
+    <!-- CENTER PANEL: Map & Telemetry -->
+    <main class="center-panel">
+      <div class="card map-card">
+        <div class="card-header-overlay">
+          <h2 class="card-title">Tactical Geographic View</h2>
+          <button class="gov-btn btn-danger" id="focusLatestRed">Focus Alert</button>
+        </div>
+        <div id="map"></div>
+      </div>
+
+      <div class="charts-row">
+        <div class="card chart-card">
+          <h2 class="card-title">Thermal Stability</h2>
+          <div class="chart-container"><canvas id="tempChart"></canvas></div>
+        </div>
+        <div class="card chart-card">
+          <h2 class="card-title">Chem vs Visual</h2>
+          <div class="chart-container"><canvas id="chemVisChart"></canvas></div>
+        </div>
+        <div class="card chart-card full-width">
+          <h2 class="card-title">Risk Trend (Fused Multi-Modal)</h2>
+          <div class="chart-container"><canvas id="fusedChart"></canvas></div>
+        </div>
+      </div>
+    </main>
+
+    <!-- RIGHT PANEL: Deep Analysis -->
+    <aside class="right-panel scroll-panel">
+      <div class="card camera-card">
+        <h2 class="card-title">Live Camera Feed</h2>
+        <div class="camera-box">
+          <img id="cameraFeed" src="" alt="Waiting for feed..." style="display:none;" />
+          <p id="cameraPlaceholder" style="color:var(--text-secondary); padding:2rem; text-align:center;">[ Signal Lost
+            ]</p>
+        </div>
+        <div class="camera-status" style="margin-top:8px; font-size:0.9rem;">
+          <strong>Status:</strong> <span id="camStatus" style="color:var(--gov-green)">ACTIVE</span><br>
+          <strong>Mode:</strong> <span id="visionMode">—</span>
         </div>
       </div>
 
-      <!-- Camera View Card -->
-      <div class="card small">
-        <h2>Live Camera Feed</h2>
-        <div
-          style="text-align:center; background:#000; padding:4px; border-radius:4px; min-height:180px; display:flex; align-items:center; justify-content:center;">
-          <img id="cameraFeed" src="" alt="Waiting for feed..."
-            style="max-width:100%; max-height:200px; display:none;" />
-          <p id="cameraPlaceholder" style="color:#666; font-size:0.9em;">[ Signal Lost / No Detections ]</p>
-        </div>
-        <p style="margin-top:8px; font-size:0.85em; color:var(--muted)">
-          <strong>Lat/Lng:</strong> <span id="camLatLng">37.7749, -122.4194</span><br />
-          <strong>Status:</strong> <span id="camStatus" style="color:#33b864">ACTIVE</span>
-        </p>
-      </div>
-    </section>
+      <div class="card analysis-card">
+        <h2 class="card-title">Fractal & Chaos Analysis</h2>
 
-    <!-- Detailed Sensor Graphs Section -->
-    <section class="row" id="detailedGraphsRow">
-      <div class="card full-width">
-        <h2>Detailed Sensor Telemetry</h2>
-        <div style="display:grid; grid-template-columns: 1fr 1fr; gap:16px">
-          <div>
-            <h4>Temperature (°C) / Env Risk</h4>
-            <canvas id="tempChart"></canvas>
-          </div>
-          <div>
-            <h4>Chemical (VOC) vs Visual (Smoke)</h4>
-            <canvas id="chemVisChart"></canvas>
+        <div style="margin-bottom: 20px;">
+          <h3>Hurst Exponent (H)</h3>
+          <div style="height:100px; width:100%"><canvas id="hurstChart"></canvas></div>
+          <div class="metric-row">
+            <span>Val: <strong id="hurstVal">—</strong></span>
+            <div class="progress-bg">
+              <div id="hurstBar" class="progress-fill" style="width:0%"></div>
+            </div>
+            <span id="fractalStatus">WAITING</span>
           </div>
         </div>
-      </div>
-    </section>
 
-    <!-- Fractal & Chaos Analysis Section -->
-    <section class="row">
-      <!-- Map & Death Vectors (Restored) -->
-      <div class="card map">
-        <h2>Map & Death Vectors</h2>
-        <div id="map" style="height: 380px;"></div>
-      </div>
-
-      <div class="card small">
-        <h2>Fractal & Chaos Analysis</h2>
-        <div style="display:grid; grid-template-columns: 1fr 1fr; gap:16px">
-          <div>
-            <h4>Hurst Exponent (Fractal Memory)</h4>
-            <canvas id="hurstChart"></canvas>
+        <div style="margin-bottom: 20px;">
+          <h3>Lyapunov Exponent (λ)</h3>
+          <div style="height:100px; width:100%"><canvas id="lyapunovChart"></canvas></div>
+          <div class="metric-row">
+            <span>Val: <strong id="lyapVal">—</strong></span>
+            <div class="progress-bg">
+              <div id="lyapBar" class="progress-fill" style="width:0%"></div>
+            </div>
+            <span id="chaosStatus">WAITING</span>
           </div>
-          <div>
-            <h4>Lyapunov Exponent (Chaos)</h4>
-            <canvas id="lyapunovChart"></canvas>
+        </div>
+
+        <div class="metric-list">
+          <h3 style="font-size:0.9rem; color:var(--text-secondary); border-bottom:1px solid #333; padding-bottom:4px;">
+            Component Breakdown</h3>
+          <div class="metric-item">
+            <span>Chemical</span> <span id="scoreChem" style="float:right">—</span>
+            <div class="progress-bg small">
+              <div id="barChem" class="progress-fill" style="background:#35b8ff; width:0%"></div>
+            </div>
+          </div>
+          <div class="metric-item">
+            <span>Visual</span> <span id="scoreVis" style="float:right">—</span>
+            <div class="progress-bg small">
+              <div id="barVis" class="progress-fill" style="background:#9b35ff; width:0%"></div>
+            </div>
+          </div>
+          <div class="metric-item">
+            <span>Env</span> <span id="scoreEnv" style="float:right">—</span>
+            <div class="progress-bg small">
+              <div id="barEnv" class="progress-fill" style="background:#ffa500; width:0%"></div>
+            </div>
           </div>
         </div>
       </div>
-    </section>
+    </aside>
+  </div>
 
-    <section class="row">
-      <!-- Duplicate Map Removed -->
-
-      <div class="card small">
-        <h2>Advanced Analysis</h2>
-
-        <div class="stat-card-row" style="display:flex; justify-content:space-between; margin-bottom:12px">
-          <div class="stat-card">
-            <h3>Mamba Output</h3>
-            <div class="stat-value" id="mambaScoreVal">0.00</div>
-          </div>
-          <div class="stat-card">
-            <h3>Visual Confidence</h3>
-            <div class="stat-value" id="visualConfVal" style="color:#ff6b35">0.00</div>
-          </div>
-        </div>
-
-        <!-- Fractal Gate -->
-        <div class="metric-box">
-          <h4>Phase-2: Fractal Gate</h4>
-          <div class="flex-row">
-            <span>Hurst (H):</span>
-            <strong id="hurstVal">—</strong>
-          </div>
-          <div class="progress-bg">
-            <div id="hurstBar" class="progress-fill" style="width:0%"></div>
-          </div>
-          <p class="status-text" id="fractalStatus">WAITING</p>
-        </div>
-
-        <!-- Chaos Kernel -->
-        <div class="metric-box" style="margin-top:12px">
-          <h4>Phase-3: Chaos Kernel</h4>
-          <div class="flex-row">
-            <span>Lyapunov (λ):</span>
-            <strong id="lyapVal">—</strong>
-          </div>
-          <div class="progress-bg">
-            <div id="lyapBar" class="progress-fill" style="width:0%"></div>
-          </div>
-          <p class="status-text" id="chaosStatus">WAITING</p>
-        </div>
-
-        <hr />
-
-        <h3>Score Breakdown</h3>
-        <div class="flex-row small"><span>Chemical</span><span id="scoreChem">—</span></div>
-        <div class="progress-bg small">
-          <div id="barChem" class="progress-fill chem" style="width:0%"></div>
-        </div>
-
-        <div class="flex-row small"><span>Visual</span><span id="scoreVis">—</span></div>
-        <div class="progress-bg small">
-          <div id="barVis" class="progress-fill vis" style="width:0%"></div>
-        </div>
-
-        <div class="flex-row small"><span>Environment</span><span id="scoreEnv">—</span></div>
-        <div class="progress-bg small">
-          <div id="barEnv" class="progress-fill env" style="width:0%"></div>
-        </div>
-      </div>
-    </section>
-  </main>
-
-  <footer>
-    <small>Local demo server: <code>/api/status</code> and <code>/api/history</code></small>
-  </footer>
-
-  <script src="app.js?v=2"></script>
+  <script src="app.js"></script>
 </body>
 
 </html>
