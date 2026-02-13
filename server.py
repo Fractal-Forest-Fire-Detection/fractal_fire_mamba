@@ -8,9 +8,13 @@ import sys
 import os
 import random
 import time
+import warnings
 from datetime import datetime
 from threading import Thread
 from typing import Dict, Any
+
+# Suppress harmless numpy corrcoef division-by-zero when sensor data is constant
+warnings.filterwarnings('ignore', message='invalid value encountered in divide')
 
 # Ensure we can import from core/phases
 sys.path.append(os.getcwd())
@@ -31,6 +35,17 @@ except ImportError as e:
     Phase0FusionEngineWithMamba = None
     Phase2FractalGate = None
     Phase3ChaosKernel = None
+
+# The Hive: Mesh Network imports
+try:
+    from phases.phase6_communication.communication_layer import (
+        MeshNetwork, RoleAwareCommunicationLayer, GPSCoordinate
+    )
+    HAS_MESH = True
+    print("DEBUG: 🐝 Hive mesh network loaded.")
+except ImportError as e:
+    HAS_MESH = False
+    print(f"⚠️  Mesh network not available: {e}")
 
 print("DEBUG: initializing FastAPI app...")
 app = FastAPI(title="Fractal Fire Mamba API")
@@ -150,6 +165,86 @@ class SystemState:
         self.latest_fractal = None
         self.latest_chaos = None
         self.running = False
+        
+        # THE HIVE: Mesh Network (Multiple Queens + Drones)
+        self.mesh_network = None
+        self.queen_comms = {}   # queen_id → RoleAwareCommunicationLayer
+        self.queen_comm = None  # primary queen (backward compat)
+        self.drone_comms = {}   # node_id → RoleAwareCommunicationLayer
+        self.latest_mesh_alert = None
+        self._init_mesh_network()
+    
+    def _init_mesh_network(self):
+        """Initialize The Hive mesh with 3 Queens × 3 Drones each = 12 nodes"""
+        if not HAS_MESH:
+            print("⚠️  Skipping mesh init — module not available")
+            return
+        
+        self.mesh_network = MeshNetwork(lora_range_meters=5000.0)
+        
+        # === 3 QUEEN NODES — Real Australian bushfire regions ===
+        queen_configs = [
+            # Deua National Park, NSW (Black Summer epicenter)
+            ("QUEEN_DEUA", -35.7200, 150.1000, "Deua National Park, NSW"),
+            # Blue Mountains, NSW (major fire corridor)
+            ("QUEEN_BLUE", -33.7170, 150.3120, "Blue Mountains, NSW"),
+            # Kangaroo Island, SA (isolated island fires)
+            ("QUEEN_KI",   -35.8000, 137.2150, "Kangaroo Island, SA"),
+        ]
+        
+        for queen_id, lat, lon, label in queen_configs:
+            queen_loc = GPSCoordinate(latitude=lat, longitude=lon)
+            comm = RoleAwareCommunicationLayer(
+                node_id=queen_id,
+                role="QUEEN",
+                location=queen_loc,
+                mesh_network=self.mesh_network,
+                has_satellite=True
+            )
+            self.queen_comms[queen_id] = comm
+            # Tag label for dropdown/API
+            self.mesh_network.nodes[queen_id]['label'] = label
+        
+        # Primary queen for backward compat
+        self.queen_comm = self.queen_comms.get("QUEEN_DEUA")
+        
+        # === DRONE NODES — 3 per Queen ===
+        drone_configs = {
+            "QUEEN_DEUA": [
+                ("D_DEUA_01", -35.7180, 150.0970, "Deua NW Sector"),
+                ("D_DEUA_02", -35.7220, 150.1030, "Deua SE Sector"),
+                ("D_DEUA_03", -35.7190, 150.1050, "Deua NE Sector"),
+            ],
+            "QUEEN_BLUE": [
+                ("D_BLUE_01", -33.7150, 150.3080, "Blue Mts West"),
+                ("D_BLUE_02", -33.7190, 150.3160, "Blue Mts East"),
+                ("D_BLUE_03", -33.7140, 150.3150, "Blue Mts North"),
+            ],
+            "QUEEN_KI": [
+                ("D_KI_01",   -35.7980, 137.2100, "KI West End"),
+                ("D_KI_02",   -35.8020, 137.2200, "KI Flinders Chase"),
+                ("D_KI_03",   -35.7970, 137.2180, "KI North Coast"),
+            ],
+        }
+        
+        for queen_id, drones in drone_configs.items():
+            for node_id, lat, lon, label in drones:
+                loc = GPSCoordinate(latitude=lat, longitude=lon)
+                comm = RoleAwareCommunicationLayer(
+                    node_id=node_id,
+                    role="DRONE",
+                    location=loc,
+                    mesh_network=self.mesh_network,
+                    queen_node_id=queen_id,
+                    has_satellite=False
+                )
+                self.drone_comms[node_id] = comm
+                self.mesh_network.nodes[node_id]['label'] = label
+                self.mesh_network.nodes[node_id]['queen_id'] = queen_id
+        
+        total_queens = len(self.queen_comms)
+        total_drones = len(self.drone_comms)
+        print(f"🐝 THE HIVE initialized: {total_queens} Queens + {total_drones} Drones = {total_queens + total_drones} nodes")
 
 system = SystemState()
 
@@ -229,6 +324,33 @@ def background_monitor():
             system.history.append(history_point)
             if len(system.history) > 100:
                 system.history.pop(0)
+            
+            # 6. THE HIVE: Route alert through mesh (Drones → Queen → Satellite)
+            if system.mesh_network and system.queen_comms and state.fire_risk_score > 0.3:
+                # Simulate drones detecting and relaying to their Queen
+                for drone_id, drone_comm in system.drone_comms.items():
+                    drone_risk = min(1.0, state.fire_risk_score + random.uniform(-0.05, 0.05))
+                    drone_result = drone_comm.process_alert(
+                        risk_score=drone_risk,
+                        confidence=state.overall_confidence,
+                        should_alert=(drone_risk > 0.5),
+                        witnesses=2,
+                        battery_level=random.uniform(60, 100)
+                    )
+                    
+                    # Route to the correct Queen for this drone
+                    if drone_result:
+                        queen_id = system.mesh_network.nodes.get(drone_id, {}).get('queen_id')
+                        queen_comm = system.queen_comms.get(queen_id) if queen_id else system.queen_comm
+                        if queen_comm:
+                            queen_result = queen_comm.receive_drone_alert(drone_result)
+                            if queen_result and queen_result.get('escalated'):
+                                system.latest_mesh_alert = queen_result
+                
+                # Periodic heartbeats (every ~10 cycles ≈ 10s for demo)
+                if len(system.history) % 10 == 0:
+                    for drone_comm in system.drone_comms.values():
+                        drone_comm.send_heartbeat()
                 
             time.sleep(1.0)
             
@@ -298,14 +420,31 @@ async def get_status():
     elif system.latest_fractal and system.latest_fractal.has_structure:
          active_phase = "Phase-2: Fractal Gate"
 
+    # Mesh/Hive info
+    mesh_info = {}
+    if system.mesh_network:
+        mesh_stats = system.mesh_network.get_statistics()
+        mesh_info = {
+            "queen_count": len(system.queen_comms),
+            "queen_ids": list(system.queen_comms.keys()),
+            "connected_drones": mesh_stats.get('online_drones', 0),
+            "total_nodes": mesh_stats.get('total_nodes', 0),
+            "messages_routed": mesh_stats.get('messages_routed', 0),
+            "satellite_uplinks": mesh_stats.get('queen_to_satellite', 0),
+            "alerts_aggregated": mesh_stats.get('alerts_aggregated', 0)
+        }
+    
     response = {
-        "node_id": "NODE-001",
+        "node_id": "QUEEN_001",
         "timestamp": s.timestamp.isoformat(),
         "risk_tier": s.get_risk_level(),
         "fire_detected": s.fire_detected,
         "location": system.latest_location,
         
-        # NEW: System Status for UI
+        # THE HIVE: Mesh Network Status
+        "mesh": mesh_info,
+        
+        # System Status for UI
         "system_status": {
             "phase": active_phase,
             "final_risk": float(f"{s.fire_risk_score:.2f}"),
@@ -362,16 +501,18 @@ async def get_history():
 
 @app.get("/api/alerts")
 async def get_alerts():
-    """Phase-5: Logical Gate (Witness Protocol) & Phase-6: Communication"""
+    """Phase-5 + Phase-6: Alerts with mesh relay paths"""
     alerts = []
-    # DIAGRAM LOGIC: "Trigger: Risk > 90%"
-    if system.latest_state and system.latest_state.fire_risk_score > 0.8: # Using 0.8 as orange/red threshold
-        # Jitter location slightly to simulate different detections or GPS noise
-        # Use actual Australian Black Summer coordinates from system.latest_location
+    if system.latest_state and system.latest_state.fire_risk_score > 0.8:
         base_lat = system.latest_location.get('latitude', -35.72) if system.latest_location else -35.72
         base_lng = system.latest_location.get('longitude', 150.10) if system.latest_location else 150.10
         lat = base_lat + random.uniform(-0.003, 0.003)
         lng = base_lng + random.uniform(-0.003, 0.003)
+        
+        # Build relay path from mesh if available
+        relay_path = "DRONE_001 → QUEEN_001 → 🛰️"
+        if system.latest_mesh_alert:
+            relay_path = system.latest_mesh_alert.get('relay_path_display', relay_path)
         
         alerts.append({
             "id": int(time.time()),
@@ -379,10 +520,19 @@ async def get_alerts():
             "message": "Phase-5 CONFIRMED: Fire signature detected",
             "timestamp": system.latest_state.timestamp.isoformat(),
             "score": f"{system.latest_state.fire_risk_score:.2f}",
-            "node_id": "NODE-001",
-            "location": {"latitude": lat, "longitude": lng}
+            "node_id": "QUEEN_001",
+            "location": {"latitude": lat, "longitude": lng},
+            "relay_path": relay_path,
+            "escalated": bool(system.latest_mesh_alert and system.latest_mesh_alert.get('escalated'))
         })
     return {"alerts": alerts}
+
+@app.get("/api/mesh")
+async def get_mesh():
+    """THE HIVE: Mesh network topology and relay status"""
+    if not system.mesh_network:
+        return {"error": "Mesh network not initialized", "nodes": [], "links": []}
+    return system.mesh_network.get_topology()
 
 @app.get("/api/death_vectors")
 async def get_death_vectors():

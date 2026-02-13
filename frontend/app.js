@@ -134,8 +134,10 @@ function updateNodeInfo(data) {
   // Update Threat Badge based on Fused Score
   if (data.mamba_ssm && data.mamba_ssm.fused_score !== undefined) {
     updateThreatBadge(data.mamba_ssm.fused_score);
-    document.getElementById('mambaScoreVal').textContent = data.mamba_ssm.fused_score.toFixed(2);
-    document.getElementById('temporalConf').textContent = (data.mamba_ssm.temporal_confidence * 100).toFixed(0) + '%';
+    const mambaEl = document.getElementById('mambaScoreVal');
+    if (mambaEl) mambaEl.textContent = data.mamba_ssm.fused_score.toFixed(2);
+    const confEl = document.getElementById('temporalConf');
+    if (confEl) confEl.textContent = (data.mamba_ssm.temporal_confidence * 100).toFixed(0) + '%';
   }
 
   if (data.node_id) {
@@ -418,16 +420,370 @@ async function focusLatestRed() {
   }
 }
 
+// ==========================================================================
+// THE HIVE: Multi-Queen Mesh Network + Map Markers
+// ==========================================================================
+
+let meshAnimFrame = 0;
+let lastMeshData = null;
+let meshMarkers = [];  // Leaflet markers for nodes
+let meshLines = [];    // Leaflet polylines for LoRa links
+let dropdownPopulated = false;
+
+async function loadMesh() {
+  try {
+    const mesh = await fetchJson(API_ROOT + '/mesh')
+    if (!mesh || !mesh.nodes) return;
+
+    lastMeshData = mesh;
+
+    // Update stats
+    const stats = mesh.stats || {}
+    document.getElementById('meshNodeCount').textContent = (mesh.nodes || []).length
+    document.getElementById('meshMsgCount').textContent = stats.messages_routed || 0
+    document.getElementById('meshSatCount').textContent = stats.queen_to_satellite || 0
+    document.getElementById('meshAggCount').textContent = stats.alerts_aggregated || 0
+
+    // Populate dropdown (once)
+    if (!dropdownPopulated && mesh.nodes.length > 0) {
+      populateNodeDropdown(mesh)
+      dropdownPopulated = true
+    }
+
+    // Draw map markers for all nodes
+    drawMeshOnMap(mesh)
+
+    // Draw mesh topology on canvas
+    drawMeshCanvas(mesh)
+
+    // Update relay log
+    updateRelayLog(mesh.recent_relays || [])
+  } catch (e) {
+    console.warn("Mesh load failed", e)
+  }
+}
+
+function populateNodeDropdown(mesh) {
+  const sel = document.getElementById('nodeSelector')
+  if (!sel) return;
+
+  // Keep the "All Regions" option
+  sel.innerHTML = '<option value="ALL">\u{1F30F} All Regions</option>'
+
+  // Group by Queens
+  const queens = mesh.nodes.filter(n => n.is_queen)
+  const drones = mesh.nodes.filter(n => !n.is_queen)
+
+  queens.forEach(q => {
+    const label = q.label || q.id
+    const lat = q.lat.toFixed(3)
+    const lon = q.lon.toFixed(3)
+    sel.innerHTML += `<option value="${q.id}">\u{1F451} ${q.id} \u2014 ${label} (${lat}, ${lon})</option>`
+
+    // Add drones for this queen
+    const myDrones = drones.filter(d => d.queen_id === q.id)
+    myDrones.forEach(d => {
+      const dlabel = d.label || d.id
+      sel.innerHTML += `<option value="${d.id}">&nbsp;&nbsp;\u{1F41D} ${d.id} \u2014 ${dlabel}</option>`
+    })
+  })
+}
+
+function drawMeshOnMap(mesh) {
+  if (!map) return;
+
+  // Clear old markers/lines
+  meshMarkers.forEach(m => map.removeLayer(m))
+  meshLines.forEach(l => map.removeLayer(l))
+  meshMarkers = []
+  meshLines = []
+
+  const nodes = mesh.nodes || []
+  const links = mesh.links || []
+
+  // Draw Queen markers (gold, larger)
+  nodes.filter(n => n.is_queen).forEach(q => {
+    const marker = L.circleMarker([q.lat, q.lon], {
+      radius: 10,
+      color: '#ffd700',
+      fillColor: '#ffd700',
+      fillOpacity: 0.9,
+      weight: 3
+    }).addTo(map)
+    marker.bindTooltip(`\u{1F451} ${q.id}<br>${q.label || ''}<br>Alerts: ${q.alerts_sent}`, {
+      permanent: false, direction: 'top'
+    })
+    meshMarkers.push(marker)
+  })
+
+  // Draw Drone markers (blue, smaller)
+  nodes.filter(n => !n.is_queen).forEach(d => {
+    const riskColor = d.risk_score > 0.7 ? '#ff4444' : d.risk_score > 0.4 ? '#ff8800' : '#0088cc'
+    const marker = L.circleMarker([d.lat, d.lon], {
+      radius: 6,
+      color: riskColor,
+      fillColor: riskColor,
+      fillOpacity: 0.8,
+      weight: 2
+    }).addTo(map)
+    marker.bindTooltip(`\u{1F41D} ${d.id}<br>${d.label || ''}<br>Risk: ${(d.risk_score || 0).toFixed(2)}`, {
+      permanent: false, direction: 'top'
+    })
+    meshMarkers.push(marker)
+  })
+
+  // Draw LoRa links as dashed lines on map
+  links.filter(l => l.type === 'lora').forEach(l => {
+    const src = nodes.find(n => n.id === l.source)
+    const tgt = nodes.find(n => n.id === l.target)
+    if (!src || !tgt) return;
+
+    const line = L.polyline([[src.lat, src.lon], [tgt.lat, tgt.lon]], {
+      color: l.active ? 'rgba(0,180,255,0.5)' : 'rgba(150,150,150,0.3)',
+      weight: 1,
+      dashArray: '5 5'
+    }).addTo(map)
+    meshLines.push(line)
+  })
+}
+
+function drawMeshCanvas(mesh) {
+  const canvas = document.getElementById('meshCanvas')
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d')
+  const w = canvas.width
+  const h = canvas.height
+
+  // Clear
+  ctx.fillStyle = '#001122'
+  ctx.fillRect(0, 0, w, h)
+
+  // Subtle grid
+  ctx.strokeStyle = 'rgba(0,80,160,0.12)'
+  ctx.lineWidth = 1
+  for (let i = 0; i < w; i += 25) {
+    ctx.beginPath(); ctx.moveTo(i, 0); ctx.lineTo(i, h); ctx.stroke()
+  }
+  for (let i = 0; i < h; i += 25) {
+    ctx.beginPath(); ctx.moveTo(0, i); ctx.lineTo(w, i); ctx.stroke()
+  }
+
+  const nodes = mesh.nodes || []
+  const links = mesh.links || []
+  if (nodes.length === 0) return;
+
+  const queens = nodes.filter(n => n.is_queen)
+  const drones = nodes.filter(n => !n.is_queen)
+
+  // Layout: distribute Queens horizontally, Drones around each Queen
+  const positions = {}
+  const qSpacing = w / (queens.length + 1)
+  const qY = h / 2
+
+  queens.forEach((q, idx) => {
+    const qx = qSpacing * (idx + 1)
+    positions[q.id] = { x: qx, y: qY }
+
+    // Position drones for this queen
+    const myDrones = drones.filter(d => d.queen_id === q.id)
+    const droneRadius = Math.min(qSpacing * 0.35, h * 0.3)
+    myDrones.forEach((d, di) => {
+      const angle = (Math.PI * 2 * di / myDrones.length) - Math.PI / 2
+      positions[d.id] = {
+        x: qx + Math.cos(angle) * droneRadius,
+        y: qY + Math.sin(angle) * droneRadius
+      }
+    })
+  })
+
+  // Satellite
+  const satX = w - 20
+  const satY = 18
+  meshAnimFrame++
+
+  // Draw LoRa links
+  links.filter(l => l.type === 'lora').forEach(l => {
+    const src = positions[l.source]
+    const tgt = positions[l.target]
+    if (!src || !tgt) return;
+
+    ctx.strokeStyle = l.active ? 'rgba(0,180,255,0.35)' : 'rgba(100,100,100,0.2)'
+    ctx.lineWidth = l.active ? 1.5 : 1
+    ctx.setLineDash([4, 4])
+    ctx.beginPath()
+    ctx.moveTo(src.x, src.y)
+    ctx.lineTo(tgt.x, tgt.y)
+    ctx.stroke()
+    ctx.setLineDash([])
+
+    if (l.active) {
+      const t = ((meshAnimFrame * 0.025 + l.source.charCodeAt(l.source.length - 1) * 0.1) % 1)
+      const dotX = src.x + (tgt.x - src.x) * t
+      const dotY = src.y + (tgt.y - src.y) * t
+      ctx.fillStyle = '#00ccff'
+      ctx.beginPath()
+      ctx.arc(dotX, dotY, 2, 0, Math.PI * 2)
+      ctx.fill()
+    }
+  })
+
+  // Satellite uplinks from each Queen
+  queens.forEach(q => {
+    const qp = positions[q.id]
+    if (!qp) return;
+    ctx.strokeStyle = 'rgba(255,215,0,0.3)'
+    ctx.lineWidth = 1
+    ctx.setLineDash([2, 5])
+    ctx.beginPath()
+    ctx.moveTo(qp.x, qp.y)
+    ctx.lineTo(satX, satY)
+    ctx.stroke()
+    ctx.setLineDash([])
+  })
+
+  // Sat icon
+  const satPulse = Math.sin(meshAnimFrame * 0.1) * 0.3 + 0.7
+  ctx.globalAlpha = satPulse
+  ctx.font = '14px sans-serif'
+  ctx.fillText('\u{1F6F0}\uFE0F', satX - 8, satY + 5)
+  ctx.globalAlpha = 1
+
+  // Draw Drones
+  drones.forEach(d => {
+    const pos = positions[d.id]
+    if (!pos) return;
+
+    const pulse = Math.sin(meshAnimFrame * 0.07 + d.id.charCodeAt(d.id.length - 1)) * 2 + 9
+    ctx.strokeStyle = 'rgba(0,180,255,0.15)'
+    ctx.lineWidth = 1
+    ctx.beginPath()
+    ctx.arc(pos.x, pos.y, pulse, 0, Math.PI * 2)
+    ctx.stroke()
+
+    const riskColor = d.risk_score > 0.7 ? '#ff4444' : d.risk_score > 0.4 ? '#ff8800' : '#0088cc'
+    ctx.fillStyle = riskColor
+    ctx.beginPath()
+    ctx.arc(pos.x, pos.y, 5, 0, Math.PI * 2)
+    ctx.fill()
+    ctx.strokeStyle = '#00ccff'
+    ctx.lineWidth = 1.5
+    ctx.stroke()
+
+    // Short label
+    ctx.fillStyle = '#5599bb'
+    ctx.font = '7px Inter, sans-serif'
+    ctx.textAlign = 'center'
+    const shortId = d.id.replace('D_', '').replace('_', '')
+    ctx.fillText(shortId, pos.x, pos.y + 14)
+    ctx.textAlign = 'left'
+  })
+
+  // Draw Queens
+  queens.forEach((q, idx) => {
+    const qp = positions[q.id]
+    if (!qp) return;
+
+    // Glow
+    const glow = ctx.createRadialGradient(qp.x, qp.y, 3, qp.x, qp.y, 18)
+    glow.addColorStop(0, 'rgba(255,215,0,0.35)')
+    glow.addColorStop(1, 'rgba(255,215,0,0)')
+    ctx.fillStyle = glow
+    ctx.beginPath()
+    ctx.arc(qp.x, qp.y, 18, 0, Math.PI * 2)
+    ctx.fill()
+
+    // Hexagon
+    ctx.fillStyle = '#ffd700'
+    ctx.beginPath()
+    for (let i = 0; i < 6; i++) {
+      const a = (Math.PI * 2 * i / 6) - Math.PI / 6
+      const px = qp.x + Math.cos(a) * 9
+      const py = qp.y + Math.sin(a) * 9
+      if (i === 0) ctx.moveTo(px, py)
+      else ctx.lineTo(px, py)
+    }
+    ctx.closePath()
+    ctx.fill()
+
+    // "Q" label
+    ctx.fillStyle = '#001122'
+    ctx.font = 'bold 8px sans-serif'
+    ctx.textAlign = 'center'
+    ctx.fillText('Q', qp.x, qp.y + 3)
+
+    // Region label
+    ctx.fillStyle = '#ffd700'
+    ctx.font = 'bold 7px Inter, sans-serif'
+    const shortName = (q.label || q.id).split(',')[0].replace('National Park', 'NP')
+    ctx.fillText(shortName, qp.x, qp.y + 22)
+    ctx.textAlign = 'left'
+  })
+
+  // Title
+  ctx.fillStyle = 'rgba(0,180,255,0.4)'
+  ctx.font = '7px Inter, sans-serif'
+  ctx.fillText(`MESH: ${queens.length}Q + ${drones.length}D`, 6, 12)
+}
+
+function updateRelayLog(relays) {
+  const container = document.getElementById('meshRelayLog')
+  if (!container || relays.length === 0) return;
+
+  const last5 = relays.slice(-5).reverse()
+  container.innerHTML = last5.map(r => {
+    const path = (r.path || []).join(' \u2192 ')
+    const isSat = r.type === 'satellite_uplink'
+    const cls = isSat ? 'relay-entry satellite' : 'relay-entry'
+    const icon = isSat ? '\u{1F6F0}\uFE0F' : '\u{1F4E1}'
+    return `<div class="${cls}">${icon} ${path}</div>`
+  }).join('')
+}
+
+// Zoom map to selected node/region
+function onNodeSelected(nodeId) {
+  if (!lastMeshData || !map) return;
+  const nodes = lastMeshData.nodes || []
+
+  if (nodeId === 'ALL') {
+    // Fit all nodes
+    if (nodes.length > 0) {
+      const bounds = L.latLngBounds(nodes.map(n => [n.lat, n.lon]))
+      map.fitBounds(bounds, { padding: [30, 30] })
+    }
+    return
+  }
+
+  const node = nodes.find(n => n.id === nodeId)
+  if (!node) return;
+
+  if (node.is_queen) {
+    // Zoom to Queen + its drones
+    const myDrones = nodes.filter(n => n.queen_id === nodeId)
+    const group = [node, ...myDrones]
+    const bounds = L.latLngBounds(group.map(n => [n.lat, n.lon]))
+    map.fitBounds(bounds, { padding: [40, 40] })
+  } else {
+    map.setView([node.lat, node.lon], 15)
+  }
+}
+
 async function refreshAll() {
   await loadHistory()
   await loadStatus()
   await loadDetections()
-  if (!map) initMap(); // Ensure map inits
+  await loadMesh()
+  if (!map) initMap();
 }
 
 window.addEventListener('load', () => {
   initMap();
   refreshAll()
+
+  // Node selector → zoom map
+  const sel = document.getElementById('nodeSelector')
+  if (sel) {
+    sel.addEventListener('change', (e) => onNodeSelected(e.target.value))
+  }
 
   const btnCsv = document.getElementById('downloadCsv');
   if (btnCsv) {
@@ -446,4 +802,9 @@ window.addEventListener('load', () => {
 
   // Refresh every 5s
   setInterval(refreshAll, 5000)
+
+  // Animate mesh canvas at 20fps
+  setInterval(() => {
+    if (lastMeshData) drawMeshCanvas(lastMeshData)
+  }, 50)
 })

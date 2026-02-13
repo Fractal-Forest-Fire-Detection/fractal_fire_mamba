@@ -1129,30 +1129,835 @@ def create_alert_from_phase5(phase5_decision,
     )
 
 
+# ============================================================================
+#  THE HIVE: MESH NETWORK (Queen + Drone Architecture)
+# ============================================================================
+
+@dataclass
+class MeshMessage:
+    """
+    Message routed through the mesh network
+    
+    Attributes:
+        message_id: Unique message ID
+        source_node_id: Originating node
+        destination_node_id: Target node (Queen ID or 'BROADCAST')
+        message_type: 'alert', 'heartbeat', 'aggregated_alert', 'satellite_uplink'
+        payload: Serialized alert or heartbeat data
+        hop_count: Number of relay hops
+        relay_path: List of node IDs the message traversed
+        timestamp: Message creation time
+    """
+    message_id: str
+    source_node_id: str
+    destination_node_id: str
+    message_type: str
+    payload: Dict
+    hop_count: int = 0
+    relay_path: List[str] = field(default_factory=list)
+    timestamp: Optional[datetime] = None
+    
+    def to_dict(self) -> Dict:
+        return {
+            'message_id': self.message_id,
+            'source': self.source_node_id,
+            'destination': self.destination_node_id,
+            'type': self.message_type,
+            'hops': self.hop_count,
+            'relay_path': self.relay_path,
+            'timestamp': self.timestamp.isoformat() if self.timestamp else None,
+            'payload': self.payload
+        }
+
+
+class MeshNetwork:
+    """
+    LoRa Mesh Network Topology Manager
+    
+    Manages the Hive architecture:
+    - Registers Queen and Drone nodes
+    - Routes messages through the mesh (Drone → Queen)
+    - Tracks relay paths for visualization
+    - Enforces role-based routing rules
+    
+    Architecture:
+    ┌─────────┐   LoRa    ┌─────────┐   LoRa    ┌─────────┐
+    │ DRONE_1 │──────────▶│         │◀──────────│ DRONE_3 │
+    └─────────┘           │  QUEEN  │           └─────────┘
+    ┌─────────┐   LoRa    │         │   Sat     ┌─────────┐
+    │ DRONE_2 │──────────▶│         │──────────▶│   🛰️    │
+    └─────────┘           └─────────┘           └─────────┘
+    """
+    
+    def __init__(self, lora_range_meters: float = 2000.0):
+        self.lora_range_meters = lora_range_meters
+        
+        # Registered nodes: node_id → {role, location, config, comm_layer, status}
+        self.nodes: Dict[str, Dict] = {}
+        
+        # Message log for visualization
+        self.message_log: List[MeshMessage] = []
+        self.max_log_size = 200
+        
+        # Queen node tracking (supports multiple Queens)
+        self.queen_node_id: Optional[str] = None  # first/primary Queen
+        self.queen_node_ids: List[str] = []  # all Queens
+        
+        # Statistics
+        self.stats = {
+            'messages_routed': 0,
+            'drone_to_queen': 0,
+            'queen_to_satellite': 0,
+            'heartbeats_received': 0,
+            'alerts_aggregated': 0,
+            'relay_hops_total': 0
+        }
+        
+        self.logger = logging.getLogger("MeshNetwork")
+    
+    def register_node(self, node_id: str, role: str, location: GPSCoordinate,
+                      config: Dict = None):
+        """
+        Register a node in the mesh network
+        
+        Args:
+            node_id: Unique node identifier
+            role: 'QUEEN' or 'DRONE'
+            location: GPS coordinates
+            config: Node configuration dict
+        """
+        self.nodes[node_id] = {
+            'role': role,
+            'location': location,
+            'config': config or {},
+            'status': 'ONLINE',
+            'last_heartbeat': datetime.now(),
+            'alerts_sent': 0,
+            'battery_level': 100.0,
+            'risk_score': 0.0
+        }
+        
+        if role == 'QUEEN':
+            if not self.queen_node_id:
+                self.queen_node_id = node_id  # first Queen is primary
+            if node_id not in self.queen_node_ids:
+                self.queen_node_ids.append(node_id)
+            self.logger.info(f"👑 QUEEN node registered: {node_id} (total: {len(self.queen_node_ids)})")
+        else:
+            self.logger.info(f"🐝 DRONE node registered: {node_id}")
+    
+    def route_message(self, message: MeshMessage) -> bool:
+        """
+        Route a message through the mesh network
+        
+        Routing Rules:
+        1. Drone alerts → Queen (via LoRa mesh)
+        2. Queen aggregated alerts → Satellite (if P1)
+        3. Heartbeats → Queen only
+        
+        Args:
+            message: MeshMessage to route
+        
+        Returns:
+            True if message was successfully routed
+        """
+        # Add source to relay path
+        if message.source_node_id not in message.relay_path:
+            message.relay_path.append(message.source_node_id)
+        
+        message.timestamp = message.timestamp or datetime.now()
+        
+        source_node = self.nodes.get(message.source_node_id)
+        if not source_node:
+            self.logger.warning(f"Unknown source node: {message.source_node_id}")
+            return False
+        
+        # Drone → Queen routing
+        if source_node['role'] == 'DRONE':
+            return self._route_drone_to_queen(message)
+        
+        # Queen → Satellite routing
+        elif source_node['role'] == 'QUEEN':
+            return self._route_queen_uplink(message)
+        
+        return False
+    
+    def _route_drone_to_queen(self, message: MeshMessage) -> bool:
+        """
+        Route message from Drone to its assigned Queen via LoRa mesh
+        
+        Supports multiple Queens — each Drone routes to its own Queen.
+        """
+        # Determine target Queen: from message destination, drone config, or primary
+        target_queen = message.destination_node_id
+        if not target_queen or target_queen not in self.nodes:
+            # Fallback: check drone's assigned queen
+            drone_node = self.nodes.get(message.source_node_id, {})
+            target_queen = drone_node.get('queen_id', self.queen_node_id)
+        
+        if not target_queen or target_queen not in self.nodes:
+            self.logger.error("No Queen node available for this Drone!")
+            return False
+        
+        queen = self.nodes[target_queen]
+        source = self.nodes[message.source_node_id]
+        
+        # Calculate distance to Queen
+        distance = source['location'].distance_to(queen['location'])
+        
+        if distance <= self.lora_range_meters:
+            # Direct link to Queen
+            message.destination_node_id = target_queen
+            message.hop_count += 1
+            message.relay_path.append(target_queen)
+            
+            self.logger.info(
+                f"📡 DRONE→QUEEN: {message.source_node_id} → "
+                f"{target_queen} (direct, {distance:.0f}m)"
+            )
+        else:
+            # Multi-hop: find closest intermediate Drone to relay
+            relay_node = self._find_relay_node(message.source_node_id, target_queen)
+            if relay_node:
+                message.hop_count += 1
+                message.relay_path.append(relay_node)
+                message.relay_path.append(target_queen)
+                message.hop_count += 1
+                
+                self.logger.info(
+                    f"📡 DRONE→RELAY→QUEEN: {message.source_node_id} → "
+                    f"{relay_node} → {target_queen}"
+                )
+            else:
+                # Fallback: assume direct even if out of range (for demo)
+                message.hop_count += 1
+                message.relay_path.append(target_queen)
+        
+        # Update stats
+        self.stats['messages_routed'] += 1
+        self.stats['drone_to_queen'] += 1
+        self.stats['relay_hops_total'] += message.hop_count
+        
+        if message.message_type == 'heartbeat':
+            self.stats['heartbeats_received'] += 1
+            self.nodes[message.source_node_id]['last_heartbeat'] = datetime.now()
+        
+        # Log the message
+        self._log_message(message)
+        
+        # Update source node stats
+        if message.source_node_id in self.nodes:
+            self.nodes[message.source_node_id]['alerts_sent'] += 1
+        
+        return True
+    
+    def _route_queen_uplink(self, message: MeshMessage) -> bool:
+        """
+        Route message from Queen to Satellite
+        
+        Queen packages aggregated intelligence and transmits via Iridium.
+        """
+        message.hop_count += 1
+        message.relay_path.append("🛰️ SATELLITE")
+        message.message_type = 'satellite_uplink'
+        
+        self.stats['messages_routed'] += 1
+        self.stats['queen_to_satellite'] += 1
+        
+        self.logger.critical(
+            f"🛰️ QUEEN→SATELLITE: {message.source_node_id} uplink "
+            f"(aggregated from {len(message.payload.get('source_drones', []))} drones)"
+        )
+        
+        self._log_message(message)
+        return True
+    
+    def _find_relay_node(self, source_id: str, target_queen_id: str = None) -> Optional[str]:
+        """Find closest Drone that can relay to Queen"""
+        queen_id = target_queen_id or self.queen_node_id
+        if not queen_id:
+            return None
+        
+        source_loc = self.nodes[source_id]['location']
+        queen_loc = self.nodes[queen_id]['location']
+        
+        best_relay = None
+        best_distance = float('inf')
+        
+        for nid, node in self.nodes.items():
+            if nid == source_id or nid == queen_id:
+                continue
+            if node['status'] != 'ONLINE':
+                continue
+            
+            # Check if this node can reach both source and Queen
+            dist_to_source = node['location'].distance_to(source_loc)
+            dist_to_queen = node['location'].distance_to(queen_loc)
+            
+            if (dist_to_source <= self.lora_range_meters and 
+                dist_to_queen <= self.lora_range_meters):
+                total_dist = dist_to_source + dist_to_queen
+                if total_dist < best_distance:
+                    best_distance = total_dist
+                    best_relay = nid
+        
+        return best_relay
+    
+    def _log_message(self, message: MeshMessage):
+        """Add message to log (capped at max_log_size)"""
+        self.message_log.append(message)
+        if len(self.message_log) > self.max_log_size:
+            self.message_log.pop(0)
+    
+    def update_node_status(self, node_id: str, battery: float = None,
+                           risk_score: float = None, status: str = None):
+        """Update a node's status information"""
+        if node_id in self.nodes:
+            if battery is not None:
+                self.nodes[node_id]['battery_level'] = battery
+            if risk_score is not None:
+                self.nodes[node_id]['risk_score'] = risk_score
+            if status is not None:
+                self.nodes[node_id]['status'] = status
+    
+    def get_topology(self) -> Dict:
+        """
+        Get mesh topology for dashboard visualization
+        
+        Returns:
+            Dictionary with nodes, links, and statistics
+            Supports multiple Queens — each Drone links to its assigned Queen.
+        """
+        nodes_data = []
+        links_data = []
+        
+        for nid, node in self.nodes.items():
+            nodes_data.append({
+                'id': nid,
+                'role': node['role'],
+                'lat': node['location'].latitude,
+                'lon': node['location'].longitude,
+                'status': node['status'],
+                'battery': node['battery_level'],
+                'risk_score': node['risk_score'],
+                'alerts_sent': node['alerts_sent'],
+                'last_heartbeat': node['last_heartbeat'].isoformat() 
+                    if node['last_heartbeat'] else None,
+                'is_queen': node['role'] == 'QUEEN',
+                'label': node.get('label', nid),
+                'queen_id': node.get('queen_id', None)
+            })
+            
+            # Add LoRa link: Drone → its assigned Queen
+            if node['role'] == 'DRONE':
+                assigned_queen = node.get('queen_id', self.queen_node_id)
+                if assigned_queen and assigned_queen in self.nodes:
+                    queen_loc = self.nodes[assigned_queen]['location']
+                    distance = node['location'].distance_to(queen_loc)
+                    links_data.append({
+                        'source': nid,
+                        'target': assigned_queen,
+                        'distance_m': round(distance, 1),
+                        'type': 'lora',
+                        'active': node['status'] == 'ONLINE'
+                    })
+        
+        # Add satellite uplink from EACH Queen
+        for queen_id in self.queen_node_ids:
+            links_data.append({
+                'source': queen_id,
+                'target': 'SATELLITE',
+                'type': 'satellite',
+                'active': True
+            })
+        
+        # Recent relay events for animation
+        recent_relays = []
+        for msg in self.message_log[-20:]:
+            recent_relays.append({
+                'path': msg.relay_path,
+                'type': msg.message_type,
+                'timestamp': msg.timestamp.isoformat() if msg.timestamp else None
+            })
+        
+        return {
+            'nodes': nodes_data,
+            'links': links_data,
+            'queen_ids': self.queen_node_ids,
+            'queen_id': self.queen_node_id,  # backward compat (primary)
+            'recent_relays': recent_relays,
+            'stats': self.stats
+        }
+    
+    def get_statistics(self) -> Dict:
+        """Get mesh network statistics"""
+        online_drones = sum(
+            1 for n in self.nodes.values()
+            if n['role'] == 'DRONE' and n['status'] == 'ONLINE'
+        )
+        return {
+            **self.stats,
+            'total_nodes': len(self.nodes),
+            'online_drones': online_drones,
+            'queen_active': self.queen_node_id is not None
+        }
+
+
+class RoleAwareCommunicationLayer:
+    """
+    Role-Aware Communication Layer (The Hive Protocol)
+    
+    Wraps Phase6CommunicationLayer with Queen/Drone intelligence:
+    
+    🐝 DRONE Node:
+        - Senses fire via 6-phase pipeline
+        - Routes ALL alerts to Queen via LoRa mesh
+        - NEVER uses satellite directly (no hardware)
+        - Sends heartbeats to Queen with jitter
+    
+    👑 QUEEN Node:
+        - Receives alerts from all Drones
+        - Aggregates multi-drone intelligence
+        - Auto-escalates when ≥2 Drones confirm same area
+        - Routes P1→Satellite, P2→LoRa gateway, P3→log
+        - Maintains mesh health tracking
+    
+    Data Flow:
+        DRONE₁ ──LoRa──▶ ┌──────┐ ──Satellite──▶ 🛰️ ──▶ 🚒
+        DRONE₂ ──LoRa──▶ │QUEEN │
+        DRONE₃ ──LoRa──▶ └──────┘
+    """
+    
+    def __init__(self, node_id: str, role: str, location: GPSCoordinate,
+                 mesh_network: 'MeshNetwork',
+                 queen_node_id: Optional[str] = None,
+                 has_satellite: bool = False,
+                 heartbeat_interval_sec: int = 3600,
+                 heartbeat_jitter_sec: int = 600):
+        """
+        Initialize Role-Aware Communication
+        
+        Args:
+            node_id: This node's unique ID
+            role: 'QUEEN' or 'DRONE'
+            location: GPS coordinates
+            mesh_network: Shared MeshNetwork instance
+            queen_node_id: Queen to route to (Drones only)
+            has_satellite: Whether this node has satellite modem
+            heartbeat_interval_sec: Heartbeat interval (Drones only)
+            heartbeat_jitter_sec: Heartbeat jitter window
+        """
+        self.node_id = node_id
+        self.role = role
+        self.location = location
+        self.mesh = mesh_network
+        self.queen_node_id = queen_node_id
+        self.has_satellite = has_satellite
+        self.heartbeat_interval_sec = heartbeat_interval_sec
+        self.heartbeat_jitter_sec = heartbeat_jitter_sec
+        
+        # Underlying Phase-6 communication
+        self.comm = Phase6CommunicationLayer(
+            node_id=node_id,
+            location=location
+        )
+        
+        # Queen-specific: aggregation buffer
+        self._drone_alerts: List[Dict] = []
+        self._aggregation_window_sec = 300  # 5-minute window
+        self._escalation_threshold = 2  # ≥2 Drones = auto-escalate
+        
+        # Heartbeat tracking
+        self._last_heartbeat = datetime.now()
+        self._heartbeat_count = 0
+        
+        # Message counter
+        self._message_counter = 0
+        
+        self.logger = logging.getLogger(f"Hive.{role}.{node_id}")
+        
+        # Register this node in the mesh
+        self.mesh.register_node(
+            node_id=node_id,
+            role=role,
+            location=location,
+            config={
+                'has_satellite': has_satellite,
+                'queen_node_id': queen_node_id,
+                'heartbeat_interval': heartbeat_interval_sec
+            }
+        )
+    
+    def process_alert(self, risk_score: float, confidence: float,
+                      should_alert: bool, witnesses: int = 0,
+                      node_temperature: float = 25.0,
+                      battery_level: float = 100.0,
+                      metadata: Dict = None) -> Optional[Dict]:
+        """
+        Process alert with role-aware routing
+        
+        Drone: Routes to Queen via mesh
+        Queen: Routes to satellite or LoRa gateway
+        
+        Returns:
+            Dictionary with alert details and relay path
+        """
+        # First, let Phase-6 determine priority
+        priority = self.comm._determine_priority(
+            risk_score, confidence, witnesses, battery_level
+        )
+        
+        # Update mesh node status
+        self.mesh.update_node_status(
+            self.node_id, battery=battery_level, risk_score=risk_score
+        )
+        
+        if self.role == 'DRONE':
+            return self._drone_process_alert(
+                risk_score, confidence, priority, witnesses,
+                node_temperature, battery_level, metadata
+            )
+        elif self.role == 'QUEEN':
+            return self._queen_process_alert(
+                risk_score, confidence, priority, witnesses,
+                node_temperature, battery_level, metadata
+            )
+        
+        return None
+    
+    def _drone_process_alert(self, risk_score, confidence, priority,
+                              witnesses, temperature, battery, metadata) -> Dict:
+        """
+        🐝 DRONE: Route alert to Queen via LoRa mesh
+        
+        Drones NEVER use satellite directly. All alerts go to Queen.
+        """
+        self._message_counter += 1
+        msg_id = f"{self.node_id}_MESH_{self._message_counter}"
+        
+        # Build alert payload
+        payload = {
+            'alert_id': msg_id,
+            'source_node': self.node_id,
+            'source_role': 'DRONE',
+            'priority': priority.name,
+            'risk_score': risk_score,
+            'confidence': confidence,
+            'witnesses': witnesses,
+            'temperature': temperature,
+            'battery': battery,
+            'location': {
+                'lat': self.location.latitude,
+                'lon': self.location.longitude
+            },
+            'timestamp': datetime.now().isoformat(),
+            'metadata': metadata or {}
+        }
+        
+        # Create mesh message
+        message = MeshMessage(
+            message_id=msg_id,
+            source_node_id=self.node_id,
+            destination_node_id=self.queen_node_id or 'QUEEN',
+            message_type='alert',
+            payload=payload,
+            timestamp=datetime.now()
+        )
+        
+        # Route through mesh to Queen
+        success = self.mesh.route_message(message)
+        
+        self.logger.info(
+            f"🐝 DRONE alert: {msg_id} | risk={risk_score:.2f} | "
+            f"priority={priority.name} | →QUEEN via LoRa"
+        )
+        
+        return {
+            'alert_id': msg_id,
+            'source': self.node_id,
+            'role': 'DRONE',
+            'priority': priority.name,
+            'risk_score': risk_score,
+            'channel': 'LORA_TO_QUEEN',
+            'relay_path': message.relay_path,
+            'relay_path_display': ' → '.join(message.relay_path),
+            'success': success,
+            'timestamp': datetime.now().isoformat()
+        }
+    
+    def _queen_process_alert(self, risk_score, confidence, priority,
+                              witnesses, temperature, battery, metadata) -> Dict:
+        """
+        👑 QUEEN: Process alert with aggregation intelligence
+        
+        Queen can generate its own alerts OR receive from Drones.
+        P1 → Satellite, P2 → LoRa Gateway, P3 → Log
+        """
+        self._message_counter += 1
+        msg_id = f"{self.node_id}_QUEEN_{self._message_counter}"
+        
+        # Use underlying Phase-6 for routing decision
+        alert = self.comm.process_alert(
+            risk_score=risk_score,
+            confidence=confidence,
+            should_alert=True,
+            witnesses=witnesses,
+            node_temperature=temperature,
+            battery_level=battery,
+            metadata=metadata
+        )
+        
+        result = {
+            'alert_id': msg_id,
+            'source': self.node_id,
+            'role': 'QUEEN',
+            'priority': priority.name,
+            'risk_score': risk_score,
+            'channel': alert.channel.value if alert else 'unknown',
+            'relay_path': [self.node_id],
+            'success': True,
+            'timestamp': datetime.now().isoformat()
+        }
+        
+        # If P1 Critical → satellite uplink
+        if priority == AlertPriority.P1_CRITICAL and self.has_satellite:
+            sat_message = MeshMessage(
+                message_id=msg_id,
+                source_node_id=self.node_id,
+                destination_node_id='SATELLITE',
+                message_type='satellite_uplink',
+                payload={
+                    'alert': result,
+                    'source_drones': [self.node_id]
+                },
+                relay_path=[self.node_id],
+                timestamp=datetime.now()
+            )
+            self.mesh.route_message(sat_message)
+            result['relay_path'] = sat_message.relay_path
+            result['channel'] = 'SATELLITE'
+        
+        result['relay_path_display'] = ' → '.join(result['relay_path'])
+        
+        self.logger.critical(
+            f"👑 QUEEN alert: {msg_id} | risk={risk_score:.2f} | "
+            f"channel={result['channel']}"
+        )
+        
+        return result
+    
+    def receive_drone_alert(self, drone_alert: Dict) -> Optional[Dict]:
+        """
+        👑 QUEEN ONLY: Receive and aggregate alert from a Drone
+        
+        Aggregation Logic:
+        - Buffer incoming Drone alerts
+        - If ≥2 Drones report fire in same area within 5 min → auto-escalate to P1
+        - Otherwise, relay at original priority
+        
+        Args:
+            drone_alert: Alert dictionary from a Drone
+        
+        Returns:
+            Aggregated/escalated alert result, or None
+        """
+        if self.role != 'QUEEN':
+            self.logger.warning("Only Queen nodes can receive Drone alerts")
+            return None
+        
+        # Add to aggregation buffer
+        self._drone_alerts.append({
+            **drone_alert,
+            'received_at': datetime.now()
+        })
+        
+        # Clean old alerts outside window
+        cutoff = datetime.now() - timedelta(seconds=self._aggregation_window_sec)
+        self._drone_alerts = [
+            a for a in self._drone_alerts
+            if datetime.fromisoformat(a.get('received_at', cutoff).isoformat()
+                if isinstance(a.get('received_at'), datetime)
+                else a.get('timestamp', cutoff.isoformat())) > cutoff
+        ]
+        
+        # Check for multi-drone consensus
+        recent_high_risk = [
+            a for a in self._drone_alerts
+            if a.get('risk_score', 0) > 0.6
+        ]
+        
+        if len(recent_high_risk) >= self._escalation_threshold:
+            # AUTO-ESCALATE: Multiple drones confirm fire!
+            source_drones = list(set(a.get('source_node', a.get('source', ''))
+                                     for a in recent_high_risk))
+            avg_risk = sum(a['risk_score'] for a in recent_high_risk) / len(recent_high_risk)
+            max_risk = max(a['risk_score'] for a in recent_high_risk)
+            
+            self.logger.critical(
+                f"🔴 MULTI-DRONE CONSENSUS: {len(source_drones)} drones confirm fire! "
+                f"Escalating to P1 CRITICAL (avg risk: {avg_risk:.2f})"
+            )
+            
+            self.mesh.stats['alerts_aggregated'] += 1
+            
+            # Create escalated satellite uplink
+            self._message_counter += 1
+            escalated_id = f"{self.node_id}_ESCALATED_{self._message_counter}"
+            
+            aggregate_payload = {
+                'alert_id': escalated_id,
+                'type': 'MULTI_DRONE_CONSENSUS',
+                'source_drones': source_drones,
+                'drone_count': len(source_drones),
+                'avg_risk': avg_risk,
+                'max_risk': max_risk,
+                'individual_alerts': [
+                    {
+                        'source': a.get('source_node', a.get('source', '')),
+                        'risk': a.get('risk_score', 0),
+                        'priority': a.get('priority', 'UNKNOWN')
+                    }
+                    for a in recent_high_risk
+                ],
+                'location': recent_high_risk[0].get('location', {}),
+                'timestamp': datetime.now().isoformat()
+            }
+            
+            # Route to satellite
+            sat_message = MeshMessage(
+                message_id=escalated_id,
+                source_node_id=self.node_id,
+                destination_node_id='SATELLITE',
+                message_type='satellite_uplink',
+                payload=aggregate_payload,
+                relay_path=[self.node_id],
+                timestamp=datetime.now()
+            )
+            self.mesh.route_message(sat_message)
+            
+            # Clear buffer after escalation
+            self._drone_alerts.clear()
+            
+            return {
+                'alert_id': escalated_id,
+                'type': 'MULTI_DRONE_CONSENSUS',
+                'escalated': True,
+                'source': self.node_id,
+                'role': 'QUEEN',
+                'priority': 'P1_CRITICAL',
+                'channel': 'SATELLITE',
+                'source_drones': source_drones,
+                'avg_risk': avg_risk,
+                'relay_path': sat_message.relay_path,
+                'relay_path_display': ' → '.join(sat_message.relay_path),
+                'timestamp': datetime.now().isoformat()
+            }
+        
+        # Single drone alert — relay at original priority
+        return {
+            'alert_id': drone_alert.get('alert_id', 'unknown'),
+            'type': 'DRONE_RELAY',
+            'escalated': False,
+            'source': drone_alert.get('source', ''),
+            'role': 'QUEEN',
+            'priority': drone_alert.get('priority', 'P3_MAINTENANCE'),
+            'channel': 'LORA_GATEWAY',
+            'buffered_alerts': len(self._drone_alerts),
+            'relay_path_display': f"{drone_alert.get('source', '?')} → {self.node_id} → Gateway",
+            'timestamp': datetime.now().isoformat()
+        }
+    
+    def send_heartbeat(self) -> Dict:
+        """
+        🐝 DRONE: Send heartbeat to Queen with collision-avoidance jitter
+        
+        Returns:
+            Heartbeat info dictionary
+        """
+        import random
+        jitter = random.uniform(0, self.heartbeat_jitter_sec)
+        
+        self._heartbeat_count += 1
+        self._last_heartbeat = datetime.now()
+        
+        hb_id = f"{self.node_id}_HB_{self._heartbeat_count}"
+        
+        payload = {
+            'heartbeat_id': hb_id,
+            'node_id': self.node_id,
+            'role': self.role,
+            'status': 'ONLINE',
+            'battery': self.mesh.nodes.get(self.node_id, {}).get('battery_level', 100),
+            'risk_score': self.mesh.nodes.get(self.node_id, {}).get('risk_score', 0),
+            'location': {
+                'lat': self.location.latitude,
+                'lon': self.location.longitude
+            },
+            'jitter_applied_sec': round(jitter, 1),
+            'timestamp': datetime.now().isoformat()
+        }
+        
+        message = MeshMessage(
+            message_id=hb_id,
+            source_node_id=self.node_id,
+            destination_node_id=self.queen_node_id or 'QUEEN',
+            message_type='heartbeat',
+            payload=payload,
+            timestamp=datetime.now()
+        )
+        
+        self.mesh.route_message(message)
+        
+        self.logger.debug(
+            f"💓 Heartbeat #{self._heartbeat_count}: {self.node_id} "
+            f"(jitter: {jitter:.0f}s)"
+        )
+        
+        return payload
+    
+    def get_mesh_status(self) -> Dict:
+        """Get this node's role-aware status"""
+        base_status = {
+            'node_id': self.node_id,
+            'role': self.role,
+            'has_satellite': self.has_satellite,
+            'location': {
+                'lat': self.location.latitude,
+                'lon': self.location.longitude
+            },
+            'heartbeat_count': self._heartbeat_count,
+            'last_heartbeat': self._last_heartbeat.isoformat(),
+            'message_count': self._message_counter,
+            'comm_stats': self.comm.get_statistics()
+        }
+        
+        if self.role == 'QUEEN':
+            base_status['buffered_drone_alerts'] = len(self._drone_alerts)
+            base_status['connected_drones'] = sum(
+                1 for n in self.mesh.nodes.values()
+                if n['role'] == 'DRONE' and n['status'] == 'ONLINE'
+            )
+        elif self.role == 'DRONE':
+            base_status['queen_node_id'] = self.queen_node_id
+        
+        return base_status
+
+
 if __name__ == "__main__":
     print("\n📡 Phase-6 Communication Layer - Production Ready")
     print("=" * 70)
-    print("\nNOTE: This module requires hardware integration for:")
-    print("      - LoRa transceiver (RFM95W/SX1276)")
-    print("      - Iridium satellite modem (RockBLOCK)")
+    print("\n🐝 THE HIVE ARCHITECTURE:")
+    print("  👑 Queen Node: Gateway with satellite modem")
+    print("  🐝 Drone Nodes: Lightweight sensors, relay to Queen via LoRa")
     print("\nKey Features:")
     print("  ✅ 3-tier priority routing (P1/P2/P3)")
     print("  ✅ LoRaWAN mesh + satellite fallback")
+    print("  ✅ Role-aware routing (Drone→Queen→Satellite)")
+    print("  ✅ Multi-drone consensus escalation")
+    print("  ✅ Collision-avoidance heartbeats (jitter)")
     print("  ✅ Death vector analysis")
     print("  ✅ Negative space mapping")
     print("  ✅ Dying gasp protocol")
     print("  ✅ Trauma decay system")
-    print("  ✅ Known burnt area check")
     print("  ✅ Fire spread prediction")
-    print("\nUsage:")
-    print("  comm = Phase6CommunicationLayer(")
-    print("      node_id='NODE_001',")
-    print("      location=GPSCoordinate(lat=37.7749, lon=-122.4194)")
-    print("  )")
-    print("  alert = comm.process_alert(")
-    print("      risk_score=0.85,")
-    print("      confidence=0.90,")
-    print("      should_alert=True,")
-    print("      witnesses=2")
-    print("  )")
     print("=" * 70)

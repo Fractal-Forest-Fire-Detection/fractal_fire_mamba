@@ -15,7 +15,7 @@
   <header class="gov-header">
     <div class="gov-brand">
       <span class="gov-logo">Official Service</span>
-      <h1 class="gov-title">National Forest Fire Monitoring Portal</h1>
+      <h1 class="gov-title">Fractal Fire Mamba Monitoring Portal</h1>
     </div>
     <div id="threatBadge" class="status-indicator status--normal">
       NORMAL OPERATIONS
@@ -26,10 +26,10 @@
     <!-- LEFT SIDEBAR: Controls & Status -->
     <aside class="sidebar scroll-panel">
       <section class="card">
-        <h2 class="card-title">Station Selection</h2>
+        <h2 class="card-title">🐝 The Hive — Node Map</h2>
         <select id="nodeSelector" class="gov-select">
-          <option value="NODE-001">Deua National Park (Primary)</option>
-          <option value="NODE-002">Monga State Forest (East)</option>
+          <option value="ALL">🌏 All Regions</option>
+          <!-- Populated dynamically from /api/mesh -->
         </select>
       </section>
 
@@ -111,6 +111,33 @@
 
     <!-- RIGHT PANEL: Deep Analysis -->
     <aside class="right-panel scroll-panel">
+      <!-- THE HIVE: Mesh Network Panel -->
+      <div class="card mesh-card">
+        <h2 class="card-title">🐝 Mesh Network — The Hive</h2>
+        <canvas id="meshCanvas" width="280" height="200"></canvas>
+        <div class="mesh-stats">
+          <div class="mesh-stat">
+            <span class="mesh-stat-label">Nodes</span>
+            <span class="mesh-stat-value" id="meshNodeCount">0</span>
+          </div>
+          <div class="mesh-stat">
+            <span class="mesh-stat-label">Routed</span>
+            <span class="mesh-stat-value" id="meshMsgCount">0</span>
+          </div>
+          <div class="mesh-stat">
+            <span class="mesh-stat-label">Sat ↑</span>
+            <span class="mesh-stat-value" id="meshSatCount">0</span>
+          </div>
+          <div class="mesh-stat">
+            <span class="mesh-stat-label">Aggregated</span>
+            <span class="mesh-stat-value" id="meshAggCount">0</span>
+          </div>
+        </div>
+        <div id="meshRelayLog" class="mesh-relay-log">
+          <p style="color:#999; font-size:0.8rem;">Waiting for relay events…</p>
+        </div>
+      </div>
+
       <div class="card camera-card">
         <h2 class="card-title">Live Camera Feed</h2>
         <div class="camera-box">
