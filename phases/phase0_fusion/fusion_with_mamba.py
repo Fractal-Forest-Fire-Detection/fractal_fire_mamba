@@ -21,10 +21,18 @@ from core.environmental_state import EnvironmentalState
 from processors.chemical_processor import ChemicalProcessor
 from processors.visual_processor import VisualProcessor
 from processors.environmental_processor import EnvironmentalContextProcessor
+
+# Try loading Hugging Face Mamba first (Phase-0 Advanced)
+try:
+    from core.temporal_mamba_hf import MambaSSM_HF
+    HF_MAMBA_AVAILABLE = True
+except ImportError:
+    HF_MAMBA_AVAILABLE = False
+
+# Fallback to Lightweight Mamba (Phase-0 Standard)
 try:
     from core.temporal_mamba_ssm_clean import MambaSSM
 except ImportError:
-    # Fallback if file renamed
     from core.temporal_mamba_ssm import MambaSSM
 
 
@@ -33,27 +41,32 @@ class Phase0FusionEngineWithMamba:
     Phase-0 Fusion Engine with Mamba SSM temporal coherence
     
     Architecture:
-    
     Sensors → Processors → Modality Scores → Mamba SSM → Perceptual State
-                ↓              ↓                ↓              ↓
-           [Chemical]     [0.0-1.0]         [Temporal]   [Fire Decision]
-           [Visual]       [Weighted]        [Analysis]   [With Trends]
-           [Environ]      [Scores]
-    
-    Key Innovation:
-    Instead of asking "Is there fire now?", we ask:
-    "What temporal pattern do I see over the last 60 seconds?"
     """
     
     def __init__(self):
         """Initialize fusion engine with Mamba SSM"""
-        # Modality processors (same as before)
+        # Modality processors
         self.chemical_processor = ChemicalProcessor()
         self.visual_processor = VisualProcessor()
         self.environmental_processor = EnvironmentalContextProcessor()
         
-        # NEW: Temporal coherence engine
-        self.mamba_ssm = MambaSSM(state_dim=8, learning_rate=0.01)
+        # Initialize Mamba (Try HF first, then Standard)
+        self.mamba_ssm = None
+        self.backend_type = "Standard"
+        
+        if HF_MAMBA_AVAILABLE:
+            try:
+                print("🚀 Attempting to load Hugging Face Mamba-130m...")
+                self.mamba_ssm = MambaSSM_HF()
+                self.backend_type = "HuggingFace"
+                print("✅ HF Mamba-130m Active (Neural Adapter Loaded)")
+            except Exception as e:
+                print(f"⚠️  HF Mamba load failed ({e}), falling back to Standard SSM.")
+                
+        if self.mamba_ssm is None:
+            self.mamba_ssm = MambaSSM(state_dim=8, learning_rate=0.01)
+            self.backend_type = "Standard (Lightweight)"
         
         # Statistics
         self.fusion_count = 0

@@ -10,6 +10,10 @@ scipy>=1.10.0
 # Computer Vision (Phase-4: Vision Mamba)
 opencv-python>=4.8.0
 
+# Hugging Face Mamba (Phase-0: Temporal Fusion)
+torch>=2.0.0
+transformers>=4.39.0
+
 # Thermal Camera (Phase-4: Night Vision - MLX90640)
 adafruit-circuitpython-mlx90640>=1.2.0
 
