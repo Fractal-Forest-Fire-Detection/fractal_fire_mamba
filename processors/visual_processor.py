@@ -95,6 +95,24 @@ class VisualProcessor:
         """
         visual_state = {}
         
+        # Check if pre-computed visual scores are available (e.g. from Smart Sensors)
+        if 'SMOKE' in validated_readings:
+            smoke = validated_readings['SMOKE'].value
+            brightness_anomaly = 0.0
+            if 'CAMERA_BRIGHTNESS' in validated_readings:
+                 # Map brightness 0-1 to anomaly? 
+                 # Let's assume passed value is already a score or raw intensity
+                 # For now, just pass it through if it looks like a score
+                 brightness_anomaly = validated_readings['CAMERA_BRIGHTNESS'].value
+            
+            return {
+                'smoke_presence': float(smoke),
+                'color_shift': float(smoke) * 0.5, # Approximation
+                'brightness_anomaly': float(brightness_anomaly),
+                'spatial_diffusion': float(smoke) * 0.8, # Approximation
+                'visual_confidence': 1.0 # Trust the smart sensor
+            }
+
         # Check if camera data is available
         if 'CAMERA' not in validated_readings:
             # No camera data - return zeros

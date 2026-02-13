@@ -111,8 +111,8 @@ class RealDataInterface:
 
         return {
             # Normalize keys to match Processor expectations
-            'VOC': MockReading(0.1 + (thermal_val * 0.8)), 
-            'TERPENE': MockReading(0.1 + (thermal_val * 0.8)), # Simulating terpenes too
+            'VOC': MockReading(100.0 + (thermal_val * 400.0)), # Scale to 100-500 PPM
+            'TERPENE': MockReading(50.0 + (thermal_val * 250.0)), # Scale to 50-300 PPM
             
             # Smoke presence from Visual Score
             'SMOKE': MockReading(visual_val),
@@ -120,7 +120,7 @@ class RealDataInterface:
             # Brightness tracks thermal intensity
             'CAMERA_BRIGHTNESS': MockReading(thermal_val),
             
-            'SOIL_MOISTURE': MockReading(0.3 - (thermal_val * 0.2)), # Inverted relationship
+            'SOIL_MOISTURE': MockReading(30.0 - (thermal_val * 20.0)), # 30% -> 10% (Critical)
             'TEMPERATURE': MockReading(25.0 + (thermal_val * 50.0)), # Map 0-1 score to 25-75C range
             'HUMIDITY': MockReading(50.0 - (thermal_val * 40.0)), # Map to 50-10% humidity
             
