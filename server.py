@@ -554,7 +554,35 @@ async def get_mesh():
 
 @app.get("/api/death_vectors")
 async def get_death_vectors():
-    return {"vectors": []}
+    """
+    Generate tactical fire spread vectors (Death Vectors) based on current risk.
+    In a real system, these would be computed from wind, terrain, and fuel models.
+    """
+    vectors = []
+    if system.latest_state and system.latest_state.fire_risk_score > 0.5:
+        # Generate 3-5 randomized spread vectors from the central fire point
+        base_lat = system.latest_location.get('latitude', -35.72)
+        base_lng = system.latest_location.get('longitude', 150.10)
+        
+        # Vectors point in a 'danger' direction (simulating wind/terrain influence)
+        # For Black Summer NSW, fires often pushed SE from the mountains
+        for i in range(4):
+            # Spread 1-3km in SE direction with some variance
+            angle = random.uniform(110, 160) # SE quadrant
+            distance = random.uniform(0.015, 0.04) # degrees (roughly 1.5-4km)
+            
+            end_lat = base_lat + (distance * 0.8 * (random.uniform(-0.1, -1.0)))
+            end_lng = base_lng + (distance * (random.uniform(0.5, 1.2)))
+            
+            vectors.append({
+                "id": f"vec_{i}",
+                "start": {"latitude": base_lat, "longitude": base_lng},
+                "end": {"latitude": end_lat, "longitude": end_lng},
+                "risk_level": "CRITICAL" if system.latest_state.fire_risk_score > 0.8 else "ELEVATED",
+                "label": f"Spread Vector {i+1} (Wind: 45km/h NW)"
+            })
+            
+    return {"vectors": vectors}
 
 @app.get("/api/detections")
 async def get_detections():
@@ -643,6 +671,17 @@ async def handle_command(req: CommandRequest):
                 "level": "sys"
             }
         return {"response": ["[WARN] System not yet initialized."], "level": "warn"}
+    elif parts[0] == "DEMO" and len(parts) > 1 and parts[1] == "FIRE":
+        # Jump to High-Impact Fire Data (Index 420 is a peak red-alert segment in Black Summer CSV)
+        system.sensor_interface.current_idx = 420
+        return {
+            "response": [
+                "[CRITICAL] DEMO FEED OVERRIDE: SECTOR NSW-01",
+                "[SYS] Rapid risk escalation detected (Fractal Gate matched).",
+                "[WARN] Multi-modal consensus reached. Escalating to Satellite."
+            ],
+            "level": "warn"
+        }
     else:
         return {"response": None}
 

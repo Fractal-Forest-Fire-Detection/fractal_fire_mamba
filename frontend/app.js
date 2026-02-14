@@ -297,6 +297,7 @@ function renderNodeTelemetry(node) {
 let map = null;
 let nodeMarker = null;
 let detectionMarkers = {};
+let deathVectorLayers = []; // Layers for spread vectors
 
 function initMap() {
   // Default to Australia
@@ -337,6 +338,48 @@ function zoomToAlert(alert, opts = { zoom: 16 }) {
       .setLatLng([alert.location.latitude, alert.location.longitude])
       .setContent(`<strong>${alert.level} ALERT</strong><br>${new Date(alert.timestamp).toLocaleTimeString()}`)
       .openOn(map);
+  }
+}
+
+async function updateDeathVectors() {
+  if (!map) return;
+  try {
+    const data = await fetchJson(API_ROOT + '/death_vectors');
+    const vectors = data.vectors || [];
+
+    // Clear old vector layers
+    deathVectorLayers.forEach(l => map.removeLayer(l));
+    deathVectorLayers = [];
+
+    vectors.forEach(v => {
+      const start = [v.start.latitude, v.start.longitude];
+      const end = [v.end.latitude, v.end.longitude];
+      const color = v.risk_level === 'CRITICAL' ? '#d4351c' : '#f47738';
+
+      // 1. Draw the polyline with a dashed pattern and glow
+      const poly = L.polyline([start, end], {
+        color: color,
+        weight: 4,
+        opacity: 0.7,
+        dashArray: '10, 10'
+      }).addTo(map);
+
+      // 2. Add an arrowhead or label for direction
+      const label = L.tooltip({
+        permanent: true,
+        direction: 'right',
+        className: 'vector-label',
+        opacity: 0.9
+      })
+        .setContent(`<span style="background:${color}; color:white; padding:2px 6px; border-radius:3px; font-size:10px;">${v.label}</span>`)
+        .setLatLng(end)
+        .addTo(map);
+
+      deathVectorLayers.push(poly);
+      deathVectorLayers.push(label);
+    });
+  } catch (e) {
+    console.warn("Death vectors load failed", e);
   }
 }
 
@@ -1198,6 +1241,7 @@ async function refreshAll() {
   await loadStatus()
   await loadDetections()
   await loadMesh()
+  await updateDeathVectors()
   if (!map) initMap();
 }
 
