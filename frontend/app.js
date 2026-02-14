@@ -13,26 +13,8 @@ const chartScaleOpts = {
 let selectedNodeDetails = null; // Stores currently selected Queen for detail view
 
 
-// Resolve API root intelligently:
-// - If frontend is served from an HTTP origin, use same-origin `/api`.
-// - If opened via file:// or running on a different host, default to localhost:8000 (demo server).
-let API_ROOT = '/api'
-try {
-  const origin = window.location && window.location.origin ? window.location.origin : ''
-  if (!origin || origin === 'null') {
-    API_ROOT = 'http://127.0.0.1:8000/api'
-  } else {
-    // Use same origin by default, but if origin is not localhost and you want local demo API,
-    // set window.FIRE_MAMBA_API manually before loading app.js
-    if (window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
-      // keep relative /api for production
-    } else {
-      // for local development if needed, but relative usually works
-    }
-  }
-} catch (e) {
-  API_ROOT = 'http://127.0.0.1:8000/api'
-}
+const API_ROOT = '/api';
+let hasAutoTriggeredSatellite = false; // Prevent multiple auto-triggers
 
 async function fetchJson(path) {
   const res = await fetch(path)
@@ -410,6 +392,23 @@ async function loadStatus() {
       updateNodeMarker(s.location, s.risk_tier)
     }
 
+    // --- AUTO-TRIGGER SATELLITE ANALYSIS (Phase 4/5 Escalation) ---
+    if (s.fire_detected && !hasAutoTriggeredSatellite) {
+      const btnSat = document.getElementById('btnSatTrigger');
+      const modal = document.getElementById('satModal');
+      // Only trigger if modal isn't already open
+      if (btnSat && modal && modal.style.display !== 'block') {
+        console.log("🚀 [AUTO-THREAT] Red Alert confirmed. Initiating Satellite Uplink...");
+        hasAutoTriggeredSatellite = true;
+        btnSat.click();
+      }
+    }
+
+    // Reset if system goes back to nominal
+    if (!s.fire_detected && s.risk_tier === 'NOMINAL') {
+      hasAutoTriggeredSatellite = false;
+    }
+
     // fetch persisted alerts
     const allAlertsResp = await fetchJson(API_ROOT + '/alerts')
     const allAlerts = allAlertsResp.alerts || []
@@ -476,8 +475,9 @@ function renderAlerts(alerts) {
     li.style.padding = '8px';
     li.style.borderBottom = '1px solid #eee';
     const time = a.ts ? new Date(a.ts).toLocaleTimeString() : ''
-    const color = a.level === 'RED' ? '#d4351c' : '#f47738';
-    li.innerHTML = `<strong style="color:${color}">${a.level}</strong> <span style="color:#505a5f; font-size:0.9em;">(${time})</span> Score: ${a.score.toFixed(2)}`
+    const color = a.level === 'RED' ? '#d4351c' : a.level === 'ORANGE' ? '#f47738' : '#00703c';
+    const levelText = a.level === 'GREEN' ? 'NOMINAL' : a.level;
+    li.innerHTML = `<strong style="color:${color}">${levelText}</strong> <span style="color:#505a5f; font-size:0.9em;">(${time})</span> Score: ${a.score}`
     ul.appendChild(li)
   })
   container.appendChild(ul)
@@ -788,13 +788,12 @@ function drawMeshCanvas(mesh) {
   ctx.closePath()
   ctx.fill()
 
-  // ── Draw Drones (clean small circles with labels) ──
+  // ── Drones (blue, smaller) ──
   drones.forEach(d => {
     const pos = positions[d.id]
     if (!pos) return;
 
-    // Status ring
-    const riskColor = d.risk_score > 0.7 ? '#dc2626' : d.risk_score > 0.4 ? '#f59e0b' : '#22c55e'
+    const riskColor = d.risk_score > 0.7 ? '#ef4444' : d.risk_score > 0.4 ? '#f97316' : '#3b82f6'
 
     // Outer ring
     ctx.strokeStyle = riskColor
@@ -803,101 +802,169 @@ function drawMeshCanvas(mesh) {
     ctx.arc(pos.x, pos.y, 8, 0, Math.PI * 2)
     ctx.stroke()
 
-    // Inner fill
+    // Fill
     ctx.fillStyle = '#ffffff'
     ctx.beginPath()
     ctx.arc(pos.x, pos.y, 6, 0, Math.PI * 2)
     ctx.fill()
 
-    // Status dot
-    ctx.fillStyle = riskColor
+    // Label
+    ctx.fillStyle = '#334155'
+    ctx.font = '9px Inter, system-ui, sans-serif'
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'middle'
+    // Show just the number suffix (e.g. "01")
+    const shortLabel = d.id.split('_').pop()
+    ctx.fillText(shortLabel, pos.x, pos.y + 0.5)
+
+    // ID Label below
+    // ctx.fillStyle = '#64748b'
+    // ctx.font = '8px Inter, system-ui, sans-serif'
+    // ctx.fillText(d.id.replace('D_',''), pos.x, pos.y + 14)
+  })
+
+  // ── Queens (gold, larger) ──
+  queens.forEach(q => {
+    const pos = positions[q.id]
+    if (!pos) return;
+
+    // Glow effect
+    const gradient = ctx.createRadialGradient(pos.x, pos.y, 8, pos.x, pos.y, 16)
+    gradient.addColorStop(0, 'rgba(251, 191, 36, 0.4)')
+    gradient.addColorStop(1, 'rgba(251, 191, 36, 0)')
+    ctx.fillStyle = gradient
     ctx.beginPath()
-    ctx.arc(pos.x, pos.y, 3, 0, Math.PI * 2)
+    ctx.arc(pos.x, pos.y, 16, 0, Math.PI * 2)
     ctx.fill()
+
+    // Circle
+    ctx.fillStyle = '#f59e0b'
+    ctx.beginPath()
+    ctx.arc(pos.x, pos.y, 10, 0, Math.PI * 2)
+    ctx.fill()
+
+    // Crown Icon (simple text)
+    ctx.fillStyle = '#ffffff'
+    ctx.font = '12px Inter'
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'middle'
+    ctx.fillText('👑', pos.x, pos.y + 1)
 
     // Label
-    ctx.fillStyle = '#475569'
-    ctx.font = '7px Inter, system-ui, sans-serif'
-    ctx.textAlign = 'center'
-    const shortId = d.id.replace('D_', '').replace('_0', '-')
-    ctx.fillText(shortId, pos.x, pos.y + 16)
-    ctx.textAlign = 'left'
+    ctx.fillStyle = '#1e293b'
+    ctx.font = 'bold 10px Inter, system-ui, sans-serif'
+    ctx.fillText(q.id.replace('QUEEN_', 'QN-'), pos.x, pos.y + 18)
   })
-
-  // ── Draw Queens (professional rounded rectangles with status) ──
-  queens.forEach((q, idx) => {
-    const qp = positions[q.id]
-    if (!qp) return;
-
-    const boxW = 56, boxH = 28, r = 4
-    const bx = qp.x - boxW / 2
-    const by = qp.y - boxH / 2
-
-    // Shadow
-    ctx.shadowColor = 'rgba(0,0,0,0.08)'
-    ctx.shadowBlur = 4
-    ctx.shadowOffsetY = 1
-
-    // Rounded rect
-    ctx.fillStyle = '#1e3a5f'
-    ctx.beginPath()
-    ctx.moveTo(bx + r, by)
-    ctx.lineTo(bx + boxW - r, by)
-    ctx.quadraticCurveTo(bx + boxW, by, bx + boxW, by + r)
-    ctx.lineTo(bx + boxW, by + boxH - r)
-    ctx.quadraticCurveTo(bx + boxW, by + boxH, bx + boxW - r, by + boxH)
-    ctx.lineTo(bx + r, by + boxH)
-    ctx.quadraticCurveTo(bx, by + boxH, bx, by + boxH - r)
-    ctx.lineTo(bx, by + r)
-    ctx.quadraticCurveTo(bx, by, bx + r, by)
-    ctx.closePath()
-    ctx.fill()
-
-    // Reset shadow
-    ctx.shadowColor = 'transparent'
-    ctx.shadowBlur = 0
-    ctx.shadowOffsetY = 0
-
-    // Queen ID inside box
-    ctx.fillStyle = '#ffffff'
-    ctx.font = 'bold 8px Inter, system-ui, sans-serif'
-    ctx.textAlign = 'center'
-    const shortName = (q.label || q.id).split(',')[0].replace('National Park', 'NP').replace(' NP', '')
-    ctx.fillText(shortName, qp.x, qp.y + 3)
-
-    // Region label below
-    ctx.fillStyle = '#475569'
-    ctx.font = '7px Inter, system-ui, sans-serif'
-    const batt = q.battery !== undefined ? q.battery : 100
-    const battColor = batt > 50 ? '#16a34a' : batt > 20 ? '#f59e0b' : '#dc2626'
-    ctx.fillText('QUEEN', qp.x, qp.y + boxH / 2 + 10)
-
-    // Battery indicator (small bar below)
-    const barW = 30, barH = 3
-    const barX = qp.x - barW / 2
-    const barY = qp.y + boxH / 2 + 14
-    ctx.fillStyle = '#e2e8f0'
-    ctx.fillRect(barX, barY, barW, barH)
-    ctx.fillStyle = battColor
-    ctx.fillRect(barX, barY, barW * (batt / 100), barH)
-
-    // Status dot (top-right corner)
-    ctx.fillStyle = '#22c55e'
-    ctx.beginPath()
-    ctx.arc(bx + boxW - 3, by + 3, 3, 0, Math.PI * 2)
-    ctx.fill()
-    ctx.strokeStyle = '#1e3a5f'
-    ctx.lineWidth = 1
-    ctx.stroke()
-
-    ctx.textAlign = 'left'
-  })
-
-  // ── Header label ──
-  ctx.fillStyle = '#94a3b8'
-  ctx.font = '8px Inter, system-ui, sans-serif'
-  ctx.fillText(`TOPOLOGY: ${queens.length} QUEEN · ${drones.length} DRONE`, 6, h - 6)
 }
+
+// ==========================================================================
+// SATELLITE ANALYTICS LOGIC (Mamba vs CNN)
+// ==========================================================================
+
+document.addEventListener('DOMContentLoaded', () => {
+  // Modal Elements
+  const modal = document.getElementById('satModal');
+  const btnTrigger = document.getElementById('btnSatTrigger');
+  const spanClose = document.getElementsByClassName("close-modal")[0];
+
+  if (btnTrigger) {
+    btnTrigger.onclick = async function () {
+      // 1. Show Modal immediately with loading state
+      modal.style.display = "block";
+      resetSatModal();
+
+      // 2. Pick a random satellite image from the known list
+      // (In a real app, this would be a file upload or live feed)
+      const demoImages = [
+        "5e0e57c4855cc20ccc748d04-1200.jpg",
+        "_111122060_2.jpg.webp", // Smoke
+        "BAtUskUTVVBLb2hckveHng-720-80.jpg" // Another available image
+      ];
+      const randomImg = demoImages[Math.floor(Math.random() * demoImages.length)];
+
+      // 3. Call Backend API
+      try {
+        const response = await fetch(API_ROOT + '/satellite/analyze', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ image_filename: randomImg })
+        });
+        const data = await response.json();
+
+        // 4. Update UI with results
+        updateSatModal(data);
+
+      } catch (e) {
+        console.error("Satellite Analysis Failed:", e);
+        alert("Satellite Uplink Failed: " + e.message);
+      }
+    }
+  }
+
+  if (spanClose) {
+    spanClose.onclick = function () {
+      modal.style.display = "none";
+    }
+  }
+
+  window.onclick = function (event) {
+    if (event.target == modal) {
+      modal.style.display = "none";
+    }
+  }
+});
+
+function resetSatModal() {
+  document.getElementById('satImage').src = "";
+  document.getElementById('satTimestamp').textContent = "Acquiring Signal...";
+
+  // Reset Bars
+  document.getElementById('cnnBar').style.width = "0%";
+  document.getElementById('cnnTime').textContent = "--s";
+  document.getElementById('cnnConf').textContent = "--%";
+
+  document.getElementById('mambaBar').style.width = "0%";
+  document.getElementById('mambaTime').textContent = "--s";
+  document.getElementById('mambaConf').textContent = "--%";
+
+  document.getElementById('satAlertBox').style.display = 'none';
+  document.getElementById('speedupFactor').textContent = "Calculatng...";
+}
+
+function updateSatModal(data) {
+  if (data.error) {
+    alert(data.error);
+    return;
+  }
+
+  // Image
+  const imgUrl = `/api/images/${data.image_path.split('/').pop()}`; // Hacky path fix
+  document.getElementById('satImage').src = imgUrl;
+  document.getElementById('satTimestamp').textContent = "Timestamp: " + new Date(data.timestamp).toLocaleString();
+
+  // CNN Stats
+  document.getElementById('cnnTime').textContent = data.cnn.duration_sec.toFixed(3) + "s";
+  document.getElementById('cnnPower').textContent = data.cnn.power_est_watts + "W";
+  document.getElementById('cnnConf').textContent = (data.cnn.confidence * 100).toFixed(1) + "%";
+  document.getElementById('cnnBar').style.width = (data.cnn.confidence * 100) + "%";
+
+  // Mamba Stats
+  document.getElementById('mambaTime').textContent = data.mamba.duration_sec.toFixed(3) + "s";
+  document.getElementById('mambaPower').textContent = data.mamba.power_est_watts + "W";
+  document.getElementById('mambaConf').textContent = (data.mamba.confidence * 100).toFixed(1) + "%";
+  document.getElementById('mambaBar').style.width = (data.mamba.confidence * 100) + "%";
+
+  // Speedup
+  document.getElementById('speedupFactor').textContent = data.speedup_factor + "x";
+
+  // Alert Box?
+  if (data.mamba.confidence > 0.6) {
+    document.getElementById('satAlertBox').style.display = 'block';
+    // Auto-Focus Map to new location (handled by global state polling, but we can force it here visually too)
+  }
+}
+
+
 
 function updateRelayLog(relays) {
   const container = document.getElementById('meshRelayLog')

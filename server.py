@@ -75,8 +75,8 @@ class MockReading:
 class RealDataInterface:
     def __init__(self, mission_file="data/real/black_summer_mission.csv"):
         self.data_rows = []
-        # Start closer to the event for demo (skip first ~4 mins of low risk)
-        self.current_idx = 230 
+        # Start at the edge of fire detection for maximum jury impact (Row 320 = Instant Orange -> Red)
+        self.current_idx = 320 
         try:
             with open(mission_file, 'r') as f:
                 reader = csv.DictReader(f)
@@ -505,6 +505,8 @@ async def get_history():
 async def get_alerts():
     """Phase-5 + Phase-6: Alerts with mesh relay paths"""
     alerts = []
+    
+    # High Risk Alerts
     if system.latest_state and system.latest_state.fire_risk_score > 0.8:
         base_lat = system.latest_location.get('latitude', -35.72) if system.latest_location else -35.72
         base_lng = system.latest_location.get('longitude', 150.10) if system.latest_location else 150.10
@@ -527,6 +529,20 @@ async def get_alerts():
             "relay_path": relay_path,
             "escalated": bool(system.latest_mesh_alert and system.latest_mesh_alert.get('escalated'))
         })
+    elif system.latest_state:
+        # Normal Operation Heartbeat (User requested "Normal Conditions" alerts)
+        alerts.append({
+            "id": int(time.time()),
+            "level": "GREEN",
+            "message": "System Nominal - Patrol Active",
+            "timestamp": system.latest_state.timestamp.isoformat(),
+            "score": f"{system.latest_state.fire_risk_score:.2f}",
+            "node_id": "QUEEN_001",
+            "location": None,
+            "relay_path": "Local",
+            "escalated": False
+        })
+        
     return {"alerts": alerts}
 
 @app.get("/api/mesh")
@@ -638,6 +654,61 @@ app.mount("/api/images", StaticFiles(directory="data/real/images"), name="real_i
 @app.get("/")
 async def read_root():
     return RedirectResponse(url="/frontend/index.html")
+
+# ============================================================================
+# SATELLITE ANALYTICS INTEGRATION
+# ============================================================================
+from processors.satellite_comparator import SatelliteComparator
+
+# Initialize Comparator (Load Models)
+satellite_comparator = SatelliteComparator(use_mock_cnn=False) # Try real MobileNet first
+
+class SatelliteRequest(BaseModel):
+    image_filename: str
+
+@app.post("/api/satellite/analyze")
+async def analyze_satellite_image(req: SatelliteRequest):
+    """
+    Trigger analysis of a satellite image.
+    1. Run Mamba vs CNN comparison.
+    2. If fire detected (confidence > 0.5), FORCE UPDATE system state to "Red Alert".
+    3. Return comparison metrics for dashboard.
+    """
+    # Construct absolute path to avoid CWD issues
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    image_path = os.path.join(base_dir, "data/real/images", req.image_filename)
+    
+    # Debug print
+    print(f"DEBUG: Analyzing satellite image at: {image_path}")
+    result = satellite_comparator.analyze_image(image_path)
+    
+    if "error" in result:
+        return result
+
+    # 2. Update System State (Simulation of "Real-Time Detection")
+    # If Mamba detects fire, we override the system state to show it on the map/charts instantly.
+    mamba_conf = result.get("mamba", {}).get("confidence", 0.0)
+    
+    if mamba_conf > 0.6: # Threshold for "Fire Detected" in this demo
+        print(f"🔥 SATELLITE ALERT: Fire detected in {req.image_filename} (Conf: {mamba_conf})")
+        
+        # Force System into RED ALERT Mode
+        if system.fusion_engine and system.latest_state:
+            # We artificially boost the current state to reflect the satellite finding
+            # This ensures the "Live Dashboard" reacts to the "Satellite Feed"
+            system.latest_state.fire_risk_score = 0.98
+            system.latest_state.fire_detected = True
+            system.latest_state.overall_confidence = mamba_conf
+            
+            # Snap location to a specific "Black Summer" hotspot for the demo
+            # (e.g., Orroral Valley if that image is used)
+            if "Orroral" in req.image_filename:
+                 system.latest_location = {"latitude": -35.63, "longitude": 149.03} # Orroral Valley
+            else:
+                 # Default to Deua deeper bushland
+                 system.latest_location = {"latitude": -35.75, "longitude": 150.05}
+
+    return result
 
 if __name__ == "__main__":
     print(f"Server starting at http://0.0.0.0:8000")

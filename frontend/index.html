@@ -211,30 +211,78 @@
           </div>
         </div>
 
-        <div class="metric-list">
-          <h3 style="font-size:0.9rem; color:var(--text-secondary); border-bottom:1px solid #333; padding-bottom:4px;">
-            Component Breakdown</h3>
-          <div class="metric-item">
-            <span>Chemical</span> <span id="scoreChem" style="float:right">—</span>
-            <div class="progress-bg small">
-              <div id="barChem" class="progress-fill" style="background:#35b8ff; width:0%"></div>
-            </div>
-          </div>
-          <div class="metric-item">
-            <span>Visual</span> <span id="scoreVis" style="float:right">—</span>
-            <div class="progress-bg small">
-              <div id="barVis" class="progress-fill" style="background:#9b35ff; width:0%"></div>
-            </div>
-          </div>
-          <div class="metric-item">
-            <span>Env</span> <span id="scoreEnv" style="float:right">—</span>
-            <div class="progress-bg small">
-              <div id="barEnv" class="progress-fill" style="background:#ffa500; width:0%"></div>
-            </div>
-          </div>
+        <!-- SATELLITE TRIGGER BUTTON -->
+        <div style="margin-top: 15px; padding-top: 15px; border-top: 1px solid #eee;">
+            <button id="btnSatTrigger" class="gov-btn btn-danger" style="width:100%">🛰️ INGEST SATELLITE FEED</button>
         </div>
       </div>
     </aside>
+  </div>
+
+  <!-- SATELLITE ANALYSIS MODAL -->
+  <div id="satModal" class="modal">
+    <div class="modal-content" style="max-width: 800px;">
+        <span class="close-modal">&times;</span>
+        <h2 class="gov-title" style="margin-bottom:10px;">🛰️ Satellite Intelligence Feed</h2>
+        
+        <div style="display:flex; gap:20px; align-items:flex-start;">
+            <!-- Left: Image -->
+            <div style="flex:1;">
+                <img id="satImage" src="" style="width:100%; border-radius:4px; border:2px solid var(--navy);" />
+                <div style="margin-top:5px; font-size:0.8rem; color:#666;" id="satTimestamp">Timestamp: --</div>
+            </div>
+            
+            <!-- Right: Analytics -->
+            <div style="flex:1;">
+                <h3 style="margin-top:0;">Model Comparison</h3>
+                
+                <!-- Comparison Box -->
+                <div style="background:#f8fafc; padding:15px; border-radius:6px; border:1px solid #e2e8f0;">
+                    
+                    <!-- CNN ROW -->
+                    <div style="margin-bottom:15px;">
+                        <div style="display:flex; justify-content:space-between; margin-bottom:5px;">
+                            <strong>Standard CNN (MobileNet)</strong>
+                            <span id="cnnTime">--s</span>
+                        </div>
+                        <div class="progress-bg" style="height:8px;">
+                            <div id="cnnBar" class="progress-fill" style="width:0%; background:#94a3b8;"></div>
+                        </div>
+                        <div style="font-size:0.8rem; color:#666; margin-top:2px;">
+                            Power Est: <span id="cnnPower">--W</span> | Conf: <span id="cnnConf">--%</span>
+                        </div>
+                    </div>
+
+                    <!-- MAMBA ROW -->
+                    <div>
+                        <div style="display:flex; justify-content:space-between; margin-bottom:5px;">
+                            <strong style="color:var(--primary);">Fractal Mamba (Ours)</strong>
+                            <span id="mambaTime" style="color:var(--primary); font-weight:bold;">--s</span>
+                        </div>
+                        <div class="progress-bg" style="height:8px;">
+                            <div id="mambaBar" class="progress-fill" style="width:0%; background:var(--primary);"></div>
+                        </div>
+                        <div style="font-size:0.8rem; color:#666; margin-top:2px;">
+                            Power Est: <span id="mambaPower">--W</span> | Conf: <span id="mambaConf">--%</span>
+                        </div>
+                    </div>
+
+                </div>
+
+                <!-- Speedup Badge -->
+                <div style="margin-top:20px; text-align:center;">
+                    <span style="background:#dcfce7; color:#166534; padding:5px 10px; border-radius:20px; font-weight:bold; font-size:0.9rem;">
+                        ⚡ <span id="speedupFactor">0x</span> FASTER
+                    </span>
+                </div>
+
+                <div id="satAlertBox" style="margin-top:20px; padding:10px; background:#fef2f2; border:1px solid #fecaca; border-radius:4px; display:none;">
+                    <strong style="color:#dc2626;">🔥 FIRE DETECTED</strong><br>
+                    <span style="font-size:0.9rem;">Coordinates synchronized. Dispatching Drones.</span>
+                </div>
+            </div>
+        </div>
+    </div>
   </div>
 
   <script src="app.js"></script>
