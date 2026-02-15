@@ -44,7 +44,6 @@
 - [Performance Benchmarks](#-performance-benchmarks)
 - [Black Box Mode — Fail-Safe Design](#-black-box-mode--fail-safe-design)
 - [Team](#-team)
-- [License](#-license)
 
 ---
 
